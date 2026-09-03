@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Новый API-ключ — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<div class="card" style="max-width:520px;margin:0 auto;">
+  <h3 style="font-size:18px;margin-bottom:14px;">Новый API-ключ</h3>
+  <p style="color:var(--text-dim);font-size:14.5px;">Сохраните его сейчас — второй раз он не показывается:</p>
+  <p><code style="font-size:14px;display:inline-block;padding:0.5rem 0.75rem;">{{ raw_key }}</code></p>
+  <p class="muted">Использование: заголовок <code>Authorization: Bearer {{ raw_key }}</code> в запросах к <code>/v1/chat/completions</code>. Старый ключ (если был) уже деактивирован.</p>
+  <a href="/"><button type="button" style="margin-top:1rem;">В кабинет</button></a>
+</div>
+</div>
+{% endblock %}

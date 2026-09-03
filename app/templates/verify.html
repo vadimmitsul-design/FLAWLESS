@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Проверка подлинности — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;max-width:640px;">
+<h1 style="font-size:24px;margin-bottom:8px;">Проверка подлинности</h1>
+<p class="muted" style="margin-top:0;">Вставьте текст — мы посчитаем его хэш и проверим, был ли он ранее зафиксирован в архиве neurohub.</p>
+
+<div class="card" style="margin:20px 0;">
+  <form method="post" action="/verify">
+    <label>Текст для проверки</label>
+    <textarea name="content" rows="6" required></textarea>
+    <button type="submit" style="margin-top:0.75rem;">Проверить</button>
+  </form>
+</div>
+
+{% if checked %}
+<div class="card" style="margin-bottom:0;">
+  {% if result %}
+    {% set a, c = result %}
+    <p style="color:var(--accent-2);font-weight:700;margin-top:0;">✓ Подтверждено</p>
+    <p class="muted" style="margin:0;">Зафиксировано пользователем «{{ c.name }}»{% if a.label %} с меткой «{{ a.label }}»{% endif %} — {{ a.created_at.strftime("%d.%m.%Y %H:%M") }} UTC.</p>
+  {% else %}
+    <p style="color:var(--bad);font-weight:700;margin-top:0;">✗ Не найдено</p>
+    <p class="muted" style="margin:0;">Такой текст в архиве не зарегистрирован.</p>
+  {% endif %}
+</div>
+{% endif %}
+</div>
+{% endblock %}

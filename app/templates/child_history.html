@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}История {{ child.name }} — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<div class="row" style="justify-content:space-between;margin-bottom:20px;">
+  <h1 style="font-size:24px;">История: {{ child.name }}</h1>
+  <a href="/">← в кабинет</a>
+</div>
+
+<div class="card" style="margin-bottom:0;">
+  {% if not events %}
+  <p class="muted">Запросов пока не было.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Модель</th><th>Токены (вход/выход)</th><th>Статус</th><th>Когда</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+    <tr>
+      <td class="mono">{{ e.model }}</td>
+      <td class="mono">{{ e.input_tokens or "—" }} / {{ e.output_tokens or "—" }}</td>
+      <td>
+        {% if e.status == 'success' %}<span class="badge badge-ok">ок</span>
+        {% elif e.status == 'failed' %}<span class="badge badge-bad">ошибка</span>
+        {% else %}<span class="badge badge-warn">в процессе</span>{% endif %}
+      </td>
+      <td style="color:var(--text-faint);">{{ e.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

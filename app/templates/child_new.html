@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Детский аккаунт — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;max-width:420px;">
+<h1 style="font-size:22px;margin-bottom:16px;">Добавить детский аккаунт</h1>
+<p class="muted" style="margin-top:0;">У ребёнка будет свой вход и свой API-ключ, но платить будете вы — списания идут с вашего баланса. В детском режиме модель отвечает как репетитор (наводящие вопросы вместо готовых ответов), а вы видите всю историю запросов.</p>
+
+{% if error %}<p style="color:var(--bad);">{{ error }}</p>{% endif %}
+
+<div class="card" style="margin-bottom:0;">
+  <form method="post" action="/children/new">
+    <label>Имя ребёнка</label>
+    <input name="name" required autofocus>
+    <label>Email (для входа)</label>
+    <input name="email" type="email" required>
+    <label>Пароль</label>
+    <input name="password" type="password" required minlength="6">
+    <button type="submit" style="width:100%;margin-top:0.75rem;">Создать</button>
+  </form>
+</div>
+</div>
+{% endblock %}

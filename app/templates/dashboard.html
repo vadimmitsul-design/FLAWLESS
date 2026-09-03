@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Кабинет — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+
+  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;">
+    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between;">
+      <div>
+        <div class="muted">Баланс</div>
+        <div class="stat">{{ "%.2f"|format(customer.balance_rub) }} ₽</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:14px;">
+        <h3 style="font-size:16px;">API-ключ</h3>
+        <form method="post" action="/api-key/regenerate">
+          <button type="submit" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">{{ "Перевыпустить" if has_key else "Выпустить ключ" }}</button>
+        </form>
+      </div>
+      {% if has_key %}
+      <p class="muted" style="margin:0 0 14px;">Активный ключ уже выпущен (показывался один раз при создании).</p>
+      {% else %}
+      <p class="muted" style="margin:0 0 14px;">Ключа ещё нет — выпустите, чтобы обращаться к <code>/v1/chat/completions</code>.</p>
+      {% endif %}
+      <div class="muted" style="margin-bottom:8px;">Доступные модели</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;">
+        {% for m in models %}<span class="mono" style="font-size:12.5px;background:var(--surface-hi);border:1px solid var(--border);border-radius:6px;padding:4px 9px;color:var(--text-dim);">{{ m }}</span>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:16px;margin-bottom:16px;">Пополнить баланс</h3>
+    <p class="muted" style="margin-top:0;">Оплата пока вручную: подайте заявку, переведите сумму по реквизитам (пришлём отдельно), админ подтвердит после поступления денег.</p>
+    <form method="post" action="/topups/new" style="display:grid;grid-template-columns:200px 1fr auto;gap:14px;align-items:end;">
+      <div>
+        <label>Сумма, ₽</label>
+        <input name="amount_rub" type="number" step="0.01" min="1" required>
+      </div>
+      <div>
+        <label>Комментарий</label>
+        <input name="note" placeholder="необязательно">
+      </div>
+      <button type="submit">Подать заявку</button>
+    </form>
+    {% if topups %}
+    <table>
+      <thead><tr><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead>
+      <tbody>
+      {% for t in topups %}
+      <tr>
+        <td class="mono">{{ "%.2f"|format(t.amount_rub) }} ₽</td>
+        <td>
+          {% if t.status == 'requested' %}<span class="badge badge-warn">ждёт подтверждения</span>
+          {% elif t.status == 'confirmed' %}<span class="badge badge-ok">зачислено</span>
+          {% else %}<span class="badge badge-bad">отклонено</span>{% endif %}
+        </td>
+        <td style="color:var(--text-faint);">{{ t.created_at.strftime("%d.%m.%Y") }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:16px;margin-bottom:16px;">Последние вызовы</h3>
+    {% if not events %}
+    <p class="muted">Пока не было ни одного вызова API.</p>
+    {% else %}
+    <table>
+      <thead><tr><th>Модель</th><th>Токены (вход/выход)</th><th>Списано</th><th>Статус</th><th></th><th>Когда</th></tr></thead>
+      <tbody>
+      {% for e in events %}
+      <tr>
+        <td class="mono">{{ e.model }}</td>
+        <td class="mono">{{ e.input_tokens or "—" }} / {{ e.output_tokens or "—" }}</td>
+        <td class="mono">{{ ("%.4f"|format(e.charged_rub) ~ " ₽") if e.charged_rub is not none else "—" }}</td>
+        <td>
+          {% if e.status == 'success' %}<span class="badge badge-ok">ок</span>
+          {% elif e.status == 'failed' %}<span class="badge badge-bad">ошибка</span>
+          {% else %}<span class="badge badge-warn">в процессе</span>{% endif %}
+        </td>
+        <td>{% if e.dlp_redactions %}<span class="badge badge-role" title="Вырезано перед отправкой: {{ e.dlp_redactions }}">DLP</span>{% endif %}</td>
+        <td style="color:var(--text-faint);">{{ e.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  {% if telegram_enabled %}
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:16px;margin-bottom:16px;">Telegram-секретарь</h3>
+    {% if telegram_linked %}
+    <p style="color:var(--accent-2);font-weight:600;margin:0;">✓ Аккаунт подключён — пишите или наговаривайте вопросы боту, ответы спишутся с этого баланса.</p>
+    {% else %}
+    <p class="muted" style="margin-top:0;">Задавайте вопросы голосом или текстом прямо в Telegram — ответы спишутся с вашего баланса neurohub.</p>
+    {% if telegram_code %}
+    <div style="background:var(--surface-hi);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;margin-bottom:14px;">
+      <div class="muted" style="margin-bottom:6px;">
+        {% if telegram_bot_username %}Напишите боту <a href="https://t.me/{{ telegram_bot_username }}" target="_blank">@{{ telegram_bot_username }}</a>:{% else %}Отправьте боту сообщение:{% endif %}
+      </div>
+      <code style="font-size:16px;">/start {{ telegram_code }}</code>
+    </div>
+    {% endif %}
+    <form method="post" action="/telegram/link">
+      <button type="submit" class="secondary">{{ "Получить новый код" if telegram_code else "Получить код привязки" }}</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if not customer.is_child %}
+  <div class="card" style="margin-top:20px;margin-bottom:0;">
+    <div class="row" style="justify-content:space-between;margin-bottom:16px;">
+      <h3 style="font-size:16px;">Мои дети (тариф «Репетитор»)</h3>
+      <a href="/children/new"><button type="button" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">Добавить</button></a>
+    </div>
+    {% if not children %}
+    <p class="muted">Детских аккаунтов пока нет.</p>
+    {% else %}
+    <table>
+      <thead><tr><th>Имя</th><th>Email</th><th></th></tr></thead>
+      <tbody>
+      {% for ch in children %}
+      <tr>
+        <td>{{ ch.name }}</td>
+        <td class="mono">{{ ch.email }}</td>
+        <td><a href="/children/{{ ch.id }}">история →</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

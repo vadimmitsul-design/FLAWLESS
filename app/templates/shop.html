@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Магазин подписок — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+
+<div class="row" style="justify-content:space-between;margin-bottom:20px;">
+  <h1 style="font-size:26px;">Купить подписку</h1>
+  <div class="muted">Баланс: <span class="mono" style="color:var(--text);">{{ "%.2f"|format(customer.balance_rub) }} ₽</span></div>
+</div>
+
+{% if error %}<p style="color:var(--bad);">{{ error }}</p>{% endif %}
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;margin-bottom:32px;">
+{% for p in products %}
+  <div class="card" style="margin-bottom:0;">
+    <h3 style="font-size:17px;margin-bottom:6px;">{{ p.name }}</h3>
+    <p class="muted" style="margin:0 0 14px;min-height:40px;">{{ p.description or "" }}</p>
+    <div class="mono" style="font-size:22px;font-weight:600;margin-bottom:16px;">{{ "%.2f"|format(p.price_rub) }} ₽</div>
+    <form method="post" action="/shop/order">
+      <input type="hidden" name="product_id" value="{{ p.id }}">
+      <label>Email аккаунта для оплаты</label>
+      <input name="account_email" type="email" placeholder="ваш аккаунт у провайдера" required>
+      <label>Комментарий (необязательно)</label>
+      <input name="note">
+      <button type="submit" style="width:100%;margin-top:0.75rem;">Купить за {{ "%.2f"|format(p.price_rub) }} ₽</button>
+    </form>
+  </div>
+{% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:0;">
+  <h3 style="font-size:16px;margin-bottom:16px;">Мои заказы</h3>
+  {% if not orders %}
+  <p class="muted">Заказов ещё не было.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Сервис</th><th>Аккаунт</th><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead>
+    <tbody>
+    {% for o, p in orders %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td class="mono">{{ o.account_email }}</td>
+      <td class="mono">{{ "%.2f"|format(o.price_rub) }} ₽</td>
+      <td>
+        {% if o.status == 'paid' %}<span class="badge badge-warn">в обработке</span>
+        {% elif o.status == 'fulfilled' %}<span class="badge badge-ok">выполнено</span>
+        {% else %}<span class="badge badge-bad">возврат</span>{% endif %}
+      </td>
+      <td style="color:var(--text-faint);">{{ o.created_at.strftime("%d.%m.%Y") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

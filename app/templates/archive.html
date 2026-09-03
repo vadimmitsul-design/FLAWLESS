@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Архив диалогов — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:26px;margin-bottom:8px;">Архив диалогов</h1>
+<p class="muted" style="margin-top:0;">Сохраняем только хэш текста и время — не сам текст. Так можно подтвердить, что именно этот контент существовал на указанную дату, не раскрывая его содержимое посторонним. Проверить можно на <a href="/verify">странице проверки</a> — она публичная.</p>
+
+{% if error %}<p style="color:var(--warn);">{{ error }}</p>{% endif %}
+
+<div class="card" style="margin:20px 0;">
+  <h3 style="font-size:16px;margin-bottom:16px;">Зафиксировать новый текст</h3>
+  <form method="post" action="/archive">
+    <label>Текст диалога / документа</label>
+    <textarea name="content" rows="6" required placeholder="Вставьте текст, который нужно сертифицировать"></textarea>
+    <label>Метка (необязательно)</label>
+    <input name="label" placeholder="например: договор с ООО Ромашка">
+    <button type="submit" style="margin-top:0.75rem;">Сохранить хэш</button>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:0;">
+  <h3 style="font-size:16px;margin-bottom:16px;">Мои записи</h3>
+  {% if not archives %}
+  <p class="muted">Записей пока нет.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Метка</th><th>Хэш</th><th>Дата</th></tr></thead>
+    <tbody>
+    {% for a in archives %}
+    <tr>
+      <td>{{ a.label or "—" }}</td>
+      <td class="mono" style="font-size:12px;">{{ a.content_hash[:16] }}…</td>
+      <td style="color:var(--text-faint);">{{ a.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

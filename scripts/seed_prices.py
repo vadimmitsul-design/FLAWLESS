@@ -1,0 +1,77 @@
+"""Сид: прайс моделей из config/models.yaml + наценка/курс.
+
+Запуск: docker compose exec neurohub python scripts/seed_prices.py
+Повторный запуск безопасен — существующие строки не трогает.
+
+ВНИМАНИЕ: цены ниже ориентировочные (не сверены со счетами провайдеров) —
+как и в AI-HUB/gateway, перед продом сверить и при расхождении закрыть
+строку (valid_until) и завести новую, задним числом не редактировать.
+markup_percent/usd_rub_rate — тоже ориентировочные, править через
+/admin (когда появится) или напрямую в pricing_config.
+"""
+
+import asyncio
+import sys
+from datetime import datetime, timezone
+from decimal import Decimal
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from sqlalchemy import select
+
+from app.db import SessionLocal
+from app.models import ModelPrice, PricingConfig
+
+PRICES_VALID_FROM = datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+# provider, model, in_per_1m, out_per_1m (USD, себестоимость без наценки)
+PRICE_ROWS = [
+    ("openai", "gpt-5-mini", "0.25", "1.00"),
+    ("anthropic", "claude-sonnet-4-6", "3.00", "15.00"),
+    ("gemini", "gemini-3.5-flash", "0.15", "0.60"),
+]
+
+DEFAULT_MARKUP_PERCENT = Decimal("30.00")
+DEFAULT_USD_RUB_RATE = Decimal("95.0000")
+
+
+async def main() -> None:
+    async with SessionLocal() as session:
+        for provider, model, in_rate, out_rate in PRICE_ROWS:
+            exists = (
+                await session.execute(
+                    select(ModelPrice).where(
+                        ModelPrice.provider == provider, ModelPrice.model == model
+                    )
+                )
+            ).scalars().first()
+            if exists is None:
+                session.add(
+                    ModelPrice(
+                        provider=provider,
+                        model=model,
+                        price_per_1m_input_tokens=Decimal(in_rate),
+                        price_per_1m_output_tokens=Decimal(out_rate),
+                        valid_from=PRICES_VALID_FROM,
+                    )
+                )
+                print(f"created price {provider}/{model}")
+
+        cfg = await session.get(PricingConfig, 1)
+        if cfg is None:
+            session.add(
+                PricingConfig(
+                    id=1, markup_percent=DEFAULT_MARKUP_PERCENT, usd_rub_rate=DEFAULT_USD_RUB_RATE
+                )
+            )
+            print(f"created pricing_config: markup={DEFAULT_MARKUP_PERCENT}% rate={DEFAULT_USD_RUB_RATE}")
+        else:
+            print("pricing_config already exists, unchanged")
+
+        await session.commit()
+        print("seed done")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

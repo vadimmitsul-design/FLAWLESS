@@ -1,0 +1,35 @@
+# Реестр моделей, доступных клиентам напрямую (клиент шлёт этот alias как
+# "model" в /v1/chat/completions — в отличие от AI-HUB/gateway, тут клиент
+# выбирает модель сам). Добавление модели = новая запись здесь + строка
+# прайса в model_prices (scripts/seed_prices.py), код не трогаем.
+#
+# model_info.fallback — список алиасов, которые пробуются по очереди, если
+# основная модель ответила ошибкой уровня провайдера (rate limit/timeout/5xx).
+# model_info — стандартное место LiteLLM для произвольных метаданных, сам
+# Router их не использует, но и не ругается на них. Подбор пар ниже — дефолт
+# для старта, поправить под реальную экономику.
+#
+# ВНИМАНИЕ: точные litellm-идентификаторы моделей ниже не проверены боевым
+# вызовом (см. CLAUDE.md) — сверить перед продом, как и в gateway/.
+
+model_list:
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+    model_info:
+      fallback: [gemini-flash]
+
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+    model_info:
+      fallback: [gpt-5-mini]
+
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-3.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+    model_info:
+      fallback: [gpt-5-mini]

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Библиотека промптов — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:26px;margin-bottom:8px;">Библиотека промптов</h1>
+<p class="muted" style="margin-top:0;">Готовые «роли» для API. Передайте <code>prompt_id</code> в запросе к <code>/v1/chat/completions</code> — цена промпта спишется сверх обычной стоимости токенов, автору уходит 50% роялти.</p>
+
+<div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(260px, 1fr));gap:16px;margin:24px 0 32px;">
+{% for p, author in marketplace %}
+  <div class="card" style="margin-bottom:0;">
+    <h3 style="font-size:16px;margin-bottom:6px;">{{ p.title }}</h3>
+    <p class="muted" style="margin:0 0 12px;min-height:36px;">{{ p.description or "" }}</p>
+    <div class="row" style="justify-content:space-between;">
+      <span class="mono" style="font-size:13px;color:var(--text-faint);">id: {{ p.id }} · автор {{ author.name }}</span>
+      <span class="mono" style="font-weight:600;">{{ "%.2f"|format(p.price_rub) }} ₽/вызов</span>
+    </div>
+  </div>
+{% else %}
+  <p class="muted">Промптов пока нет — станьте первым автором ниже.</p>
+{% endfor %}
+</div>
+
+<div class="card" style="margin-bottom:32px;">
+  <h3 style="font-size:16px;margin-bottom:16px;">Опубликовать свой промпт</h3>
+  <form method="post" action="/prompts">
+    <label>Название</label>
+    <input name="title" placeholder="Юрист по договорам" required>
+    <label>Описание (необязательно)</label>
+    <input name="description" placeholder="Разбирает риски в договоре">
+    <label>Системный промпт</label>
+    <textarea name="system_prompt" rows="4" required placeholder="Ты — юрист, специализирующийся на..."></textarea>
+    <label>Цена за вызов, ₽</label>
+    <input name="price_rub" type="number" step="0.01" min="0.01" required>
+    <button type="submit" style="margin-top:0.75rem;">Опубликовать</button>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:0;">
+  <h3 style="font-size:16px;margin-bottom:16px;">Мои промпты</h3>
+  {% if not my_prompts %}
+  <p class="muted">Вы ещё не публиковали промптов.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Название</th><th>Цена</th><th>ID (для API)</th></tr></thead>
+    <tbody>
+    {% for p in my_prompts %}
+    <tr>
+      <td>{{ p.title }}</td>
+      <td class="mono">{{ "%.2f"|format(p.price_rub) }} ₽</td>
+      <td class="mono">{{ p.id }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

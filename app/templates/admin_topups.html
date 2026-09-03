@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Пополнения — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:22px;margin-bottom:20px;">Заявки на пополнение</h1>
+<div class="card" style="margin-bottom:0;">
+{% if not rows %}
+<p class="muted">Заявок нет.</p>
+{% else %}
+<table>
+<thead><tr><th>Клиент</th><th>Сумма</th><th>Комментарий</th><th>Статус</th><th>Действие</th></tr></thead>
+<tbody>
+{% for t, c in rows %}
+<tr>
+  <td>{{ c.name }}<div class="muted" style="margin:0;">{{ c.email }}</div></td>
+  <td class="mono">{{ "%.2f"|format(t.amount_rub) }} ₽</td>
+  <td class="muted">{{ t.note or "" }}</td>
+  <td>
+    {% if t.status == 'requested' %}<span class="badge badge-warn">ждёт подтверждения</span>
+    {% elif t.status == 'confirmed' %}<span class="badge badge-ok">зачислено</span>
+    {% else %}<span class="badge badge-bad">отклонено</span>{% endif %}
+  </td>
+  <td>
+    {% if t.status == 'requested' %}
+    <form class="inline" method="post" action="/admin/topups/{{ t.id }}/confirm">
+      <button type="submit" style="height:36px;padding:0 14px;font-size:13px;">Деньги пришли</button>
+    </form>
+    <form class="inline" method="post" action="/admin/topups/{{ t.id }}/reject">
+      <button type="submit" class="secondary" style="height:36px;padding:0 14px;font-size:13px;">Отклонить</button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+</div>
+{% endblock %}

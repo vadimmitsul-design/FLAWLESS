@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Заказы подписок — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:22px;margin-bottom:20px;">Заказы подписок</h1>
+{% if not rows %}
+<p class="muted">Заказов нет.</p>
+{% else %}
+<table>
+<thead><tr><th>Клиент</th><th>Сервис</th><th>Аккаунт</th><th>Комментарий</th><th>Сумма</th><th>Статус</th><th>Действие</th></tr></thead>
+<tbody>
+{% for o, p, c in rows %}
+<tr>
+  <td>{{ c.name }}<div class="muted" style="margin:0;">{{ c.email }}</div></td>
+  <td>{{ p.name }}</td>
+  <td class="mono">{{ o.account_email }}</td>
+  <td class="muted">{{ o.note or "" }}</td>
+  <td class="mono">{{ "%.2f"|format(o.price_rub) }} ₽</td>
+  <td>
+    {% if o.status == 'paid' %}<span class="badge badge-warn">в обработке</span>
+    {% elif o.status == 'fulfilled' %}<span class="badge badge-ok">выполнено</span>
+    {% else %}<span class="badge badge-bad">возврат</span>{% endif %}
+  </td>
+  <td>
+    {% if o.status == 'paid' %}
+    <form class="inline" method="post" action="/admin/orders/{{ o.id }}/fulfill">
+      <button type="submit">Оплачено провайдеру</button>
+    </form>
+    <form class="inline" method="post" action="/admin/orders/{{ o.id }}/refund">
+      <button type="submit" class="secondary">Вернуть деньги</button>
+    </form>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+{% endblock %}
