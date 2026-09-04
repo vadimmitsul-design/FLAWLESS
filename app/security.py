@@ -44,17 +44,20 @@ async def get_current_customer(
 
 async def get_customer_by_api_key(
     request: Request, session: AsyncSession = Depends(get_session)
-) -> Customer:
+) -> tuple[Customer, ApiKey]:
+    """Возвращает (Customer, ApiKey) — конкретный ключ нужен вызывающему коду
+    для лимитов расхода НА КЛЮЧ (2.2 доработок), не только для опознания
+    клиента."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail={"error": {"message": "missing bearer token", "type": "invalid_request_error"}})
     token = auth.removeprefix("Bearer ").strip()
     stmt = (
-        select(Customer)
+        select(Customer, ApiKey)
         .join(ApiKey, ApiKey.customer_id == Customer.id)
         .where(ApiKey.key_hash == hash_api_key(token), ApiKey.active, Customer.active)
     )
-    customer = (await session.execute(stmt)).scalar_one_or_none()
-    if customer is None:
+    row = (await session.execute(stmt)).first()
+    if row is None:
         raise HTTPException(status_code=401, detail={"error": {"message": "invalid API key", "type": "invalid_request_error"}})
-    return customer
+    return row[0], row[1]

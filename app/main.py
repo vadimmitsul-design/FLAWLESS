@@ -200,11 +200,13 @@ async def dashboard(
     if customer is None:
         return templates.TemplateResponse(request, "landing.html", {"customer": None})
 
-    has_key = (
+    api_keys = (
         await session.execute(
-            select(ApiKey).where(ApiKey.customer_id == customer.id, ApiKey.active)
+            select(ApiKey)
+            .where(ApiKey.customer_id == customer.id, ApiKey.active)
+            .order_by(ApiKey.created_at.desc())
         )
-    ).scalar_one_or_none() is not None
+    ).scalars().all()
     events = (
         await session.execute(
             select(UsageEvent)
@@ -234,7 +236,7 @@ async def dashboard(
         "dashboard.html",
         {
             "customer": customer,
-            "has_key": has_key,
+            "api_keys": api_keys,
             "events": events,
             "topups": my_topups,
             "models": llm.known_models(),
@@ -248,23 +250,69 @@ async def dashboard(
 
 
 @app.post("/api-key/regenerate")
-async def regenerate_api_key(
+async def create_api_key(
     request: Request,
+    name: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Название маршрута сохранено для обратной совместимости (документация/
+    закладки), поведение — уже не "перевыпуск", а "ещё один именованный
+    ключ" (2.1 доработок): старые ключи больше не деактивируются."""
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+
+    raw_key = generate_api_key()
+    session.add(
+        ApiKey(
+            customer_id=customer.id,
+            name=name.strip() or "Без названия",
+            key_hash=hash_api_key(raw_key),
+            last_four=raw_key[-4:],
+        )
+    )
+    await session.commit()
+    return templates.TemplateResponse(
+        request, "api_key_shown.html", {"customer": customer, "raw_key": raw_key}
+    )
+
+
+@app.post("/api-keys/{key_id}/revoke")
+async def revoke_api_key(
+    key_id: int,
     customer: Customer | None = Depends(get_current_customer),
     session: AsyncSession = Depends(get_session),
 ):
     if customer is None:
         return RedirectResponse("/login", status_code=303)
-
-    await session.execute(
-        ApiKey.__table__.update().where(ApiKey.customer_id == customer.id).values(active=False)
-    )
-    raw_key = generate_api_key()
-    session.add(ApiKey(customer_id=customer.id, key_hash=hash_api_key(raw_key)))
+    api_key = await session.get(ApiKey, key_id)
+    if api_key is None or api_key.customer_id != customer.id:
+        raise HTTPException(status_code=404)
+    api_key.active = False
     await session.commit()
-    return templates.TemplateResponse(
-        request, "api_key_shown.html", {"customer": customer, "raw_key": raw_key}
-    )
+    return RedirectResponse("/", status_code=303)
+
+
+@app.post("/api-keys/{key_id}/limits")
+async def set_api_key_limits(
+    key_id: int,
+    daily_limit_rub: str = Form(""),
+    monthly_limit_rub: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Клиент настраивает СВОИ лимиты (2.2 доработок) — пусто = лимита нет.
+    Не может снять/обойти admin_*_limit_rub — тот проверяется отдельно как
+    потолок поверх (см. billing.check_api_key_spend_limits)."""
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    api_key = await session.get(ApiKey, key_id)
+    if api_key is None or api_key.customer_id != customer.id:
+        raise HTTPException(status_code=404)
+    api_key.daily_limit_rub = Decimal(daily_limit_rub) if daily_limit_rub.strip() else None
+    api_key.monthly_limit_rub = Decimal(monthly_limit_rub) if monthly_limit_rub.strip() else None
+    await session.commit()
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/topups/new")
@@ -820,6 +868,52 @@ async def admin_refund_order(
     return RedirectResponse("/admin/orders", status_code=303)
 
 
+# ---------- веб: админ — API-ключи (2.2 доработок) ----------
+
+
+@app.get("/admin/api-keys")
+async def admin_api_keys(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    rows = (
+        await session.execute(
+            select(ApiKey, Customer)
+            .join(Customer, Customer.id == ApiKey.customer_id)
+            .where(ApiKey.active)
+            .order_by(ApiKey.created_at.desc())
+        )
+    ).all()
+    return templates.TemplateResponse(request, "admin_api_keys.html", {"customer": customer, "rows": rows})
+
+
+@app.post("/admin/api-keys/{key_id}/limits")
+async def admin_set_api_key_limits(
+    key_id: int,
+    daily_limit_rub: str = Form(""),
+    monthly_limit_rub: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Потолок админа поверх клиентского (не замена — см.
+    billing._effective_limit) — для реакции на подозрительный ключ, не
+    дожидаясь, пока клиент сам себя ограничит."""
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    api_key = await session.get(ApiKey, key_id)
+    if api_key is None:
+        raise HTTPException(status_code=404)
+    api_key.admin_daily_limit_rub = Decimal(daily_limit_rub) if daily_limit_rub.strip() else None
+    api_key.admin_monthly_limit_rub = Decimal(monthly_limit_rub) if monthly_limit_rub.strip() else None
+    await session.commit()
+    return RedirectResponse("/admin/api-keys", status_code=303)
+
+
 # ---------- детский тариф «Репетитор» ----------
 
 _CHILD_SYSTEM_PROMPT = (
@@ -919,13 +1013,33 @@ def _replay_idempotent_response(existing: UsageEvent):
 async def chat_completions(
     request: Request,
     body: ChatCompletionRequest,
-    customer: Customer = Depends(get_customer_by_api_key),
+    auth: tuple[Customer, ApiKey] = Depends(get_customer_by_api_key),
     session: AsyncSession = Depends(get_session),
 ):
-    if not ratelimit.check(customer.id):
+    customer, api_key = auth
+
+    if not ratelimit.check(api_key.id):
         raise HTTPException(
             status_code=429,
             detail={"error": {"message": "rate limit exceeded, slow down", "type": "rate_limit_error"}},
+        )
+
+    # 2.2 доработок: дневной/месячный потолок расхода НА ЭТОТ КЛЮЧ — до
+    # резерва/вызова провайдера, чтобы не тратить деньги на заведомо
+    # заблокированный запрос.
+    try:
+        await billing.check_api_key_spend_limits(session, api_key)
+    except billing.SpendLimitExceeded as e:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": {
+                    "message": f"{e.period} spend limit exceeded for this API key",
+                    "type": "spend_limit_exceeded",
+                    "limit_rub": str(e.limit),
+                    "spent_rub": str(e.spent),
+                }
+            },
         )
 
     extra = {
@@ -1045,6 +1159,7 @@ async def chat_completions(
     if idempotency_key is not None:
         event.idempotency_request_hash = request_hash
 
+    event.api_key_id = api_key.id
     if dlp_found:
         event.dlp_redactions = ",".join(sorted(set(dlp_found)))
     if prompt is not None:

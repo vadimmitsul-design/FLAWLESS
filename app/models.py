@@ -57,16 +57,26 @@ class Customer(Base):
 
 
 class ApiKey(Base):
-    """Ключ для /v1/chat/completions (Authorization: Bearer <ключ>). Один
-    активный ключ на клиента для MVP — перевыпуск деактивирует старый.
-    """
+    """Ключ для /v1/chat/completions (Authorization: Bearer <ключ>). У клиента
+    может быть несколько именованных ключей (2.2 доработок) — каждый со
+    своими лимитами расхода. last_four — последние 4 символа сырого ключа для
+    опознания в списке; сам ключ по хэшу не восстановить."""
 
     __tablename__ = "api_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    name: Mapped[str] = mapped_column(Text, default="", server_default="")
     key_hash: Mapped[str] = mapped_column(Text, unique=True)
+    last_four: Mapped[str] = mapped_column(Text, default="", server_default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # Лимиты расхода (2.2): клиент настраивает свои daily/monthly_limit_rub в
+    # кабинете; admin_*_limit_rub — потолок админа поверх (не заменяет
+    # клиентский, действует минимум из заданных — см. billing._effective_limit).
+    daily_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    monthly_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    admin_daily_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    admin_monthly_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -135,6 +145,9 @@ class UsageEvent(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     billing_customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    # NULL для вызовов не через /v1/chat/completions (Telegram-секретарь —
+    # там нет API-ключа вообще). Нужен для лимитов расхода НА КЛЮЧ (2.2).
+    api_key_id: Mapped[int | None] = mapped_column(ForeignKey("api_keys.id"), index=True)
     provider: Mapped[str] = mapped_column(Text)
     model: Mapped[str] = mapped_column(Text)
     prompt_id: Mapped[int | None] = mapped_column(ForeignKey("prompts.id"))

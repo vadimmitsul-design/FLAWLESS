@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}API-ключи — neurohub{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:22px;margin-bottom:8px;">API-ключи клиентов</h1>
+<p class="muted" style="margin-top:0;">Потолок здесь — поверх лимита клиента, не замена: действует меньшее из двух. Для реакции на подозрительный ключ, не дожидаясь клиента.</p>
+<div class="card" style="margin-bottom:0;">
+{% if not rows %}
+<p class="muted">Активных ключей нет.</p>
+{% else %}
+<table>
+<thead><tr><th>Клиент</th><th>Ключ</th><th>Лимит клиента (день/мес)</th><th>Потолок админа (день/мес)</th><th>Действие</th></tr></thead>
+<tbody>
+{% for k, c in rows %}
+<tr>
+  <td>{{ c.name }}<div class="muted" style="margin:0;">{{ c.email }}</div></td>
+  <td>{{ k.name or "Без названия" }}<div class="muted mono" style="margin:0;">…{{ k.last_four }}</div></td>
+  <td class="mono">
+    {{ "%.2f"|format(k.daily_limit_rub) ~ " ₽" if k.daily_limit_rub is not none else "—" }} /
+    {{ "%.2f"|format(k.monthly_limit_rub) ~ " ₽" if k.monthly_limit_rub is not none else "—" }}
+  </td>
+  <td class="mono">
+    {{ "%.2f"|format(k.admin_daily_limit_rub) ~ " ₽" if k.admin_daily_limit_rub is not none else "—" }} /
+    {{ "%.2f"|format(k.admin_monthly_limit_rub) ~ " ₽" if k.admin_monthly_limit_rub is not none else "—" }}
+  </td>
+  <td>
+    <form class="inline" method="post" action="/admin/api-keys/{{ k.id }}/limits" style="display:flex;gap:8px;align-items:center;">
+      <input name="daily_limit_rub" type="number" step="0.01" min="0" placeholder="день ₽" style="width:110px;height:36px;">
+      <input name="monthly_limit_rub" type="number" step="0.01" min="0" placeholder="месяц ₽" style="width:110px;height:36px;">
+      <button type="submit" class="secondary" style="height:36px;padding:0 14px;font-size:13px;">Задать</button>
+    </form>
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+</div>
+{% endblock %}
