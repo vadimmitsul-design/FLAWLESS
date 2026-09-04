@@ -111,6 +111,10 @@ def extract_chat_usage(response: Any) -> UsageAmounts:
     return UsageAmounts(
         input_text_tokens=_field(usage, "prompt_tokens"),
         cached_tokens=_field(details, "cached_tokens"),
+        # Anthropic (через LiteLLM) кладёт запись в кэш отдельным полем
+        # cache_creation_input_tokens прямо на usage, не в prompt_tokens_details —
+        # не проверено боевым вызовом на Claude, см. CLAUDE.md.
+        cache_write_tokens=_field(usage, "cache_creation_input_tokens"),
         output_tokens=_field(usage, "completion_tokens"),
     )
 

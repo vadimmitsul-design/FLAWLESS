@@ -17,6 +17,24 @@ class Settings(BaseSettings):
     rate_limit_window_seconds: int = 60
     telegram_bot_token: str = ""
     telegram_default_model: str = "gpt-5-mini"
+    # Резерв под вызов (1.1 доработок) считается по max_tokens клиента, если
+    # он есть, иначе по этому дефолту — сознательно с запасом.
+    default_max_output_tokens_estimate: int = 4096
+    # Запас поверх грубой оценки резерва (1.1) — эвристика ~4 символа/токен
+    # занижает не-латинские языки (кириллица ближе к ~2-2.5 симв/токен, а это
+    # основной язык клиентов), и не учитывает премию за запись в кэш. Найдено
+    # состязательным ревью 2026-09-04, см. CLAUDE.md.
+    reserve_safety_margin: float = 1.5
+    # Резерв, когда прайса вообще нет (новая модель без сида, просроченная
+    # строка цены) — раньше падало на 0₽, что полностью отключало защиту
+    # резервом именно в этом случае. Найдено состязательным ревью 2026-09-04.
+    fallback_reserve_rub_when_unpriced: float = 50.0
+    # Уборщик зависших pending-событий (app/reaper.py) — если процесс упал
+    # целиком между start_call и finalize_*, ни except, ни finally не
+    # выполнятся вообще, резерв виснет навсегда без внешней подметки.
+    # С запасом над llm_num_retries * llm_timeout_seconds (сейчас 2*120=240с).
+    stale_pending_reap_after_seconds: int = 600
+    reaper_interval_seconds: int = 120
 
 
 settings = Settings()

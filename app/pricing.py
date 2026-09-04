@@ -13,6 +13,7 @@ from typing import Sequence
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import ModelPrice
 
 _MILLION = Decimal(1_000_000)
@@ -25,6 +26,7 @@ class UsageAmounts:
     input_text_tokens: int | None = None
     input_image_tokens: int | None = None
     cached_tokens: int | None = None
+    cache_write_tokens: int | None = None
     output_tokens: int | None = None
 
 
@@ -89,7 +91,58 @@ def compute_cost(price: ModelPrice | None, usage: UsageAmounts) -> Decimal | Non
     add(price.price_per_1m_input_image_tokens, usage.input_image_tokens)
     add(price.price_per_1m_output_tokens, usage.output_tokens)
     add(price.price_per_1m_cached_tokens, usage.cached_tokens)
+    add(price.price_per_1m_cache_write_tokens, usage.cache_write_tokens)
 
     if not priced:
         return None
     return total.quantize(_CENT_MICRO)
+
+
+_CHARS_PER_TOKEN = 4
+
+
+def _estimate_tokens_from_char_count(char_count: int) -> int:
+    return max(1, char_count // _CHARS_PER_TOKEN) if char_count else 0
+
+
+def estimate_tokens_from_text(text: str) -> int:
+    """Грубая оценка ~4 символа/токен — используется ТОЛЬКО там, где точного
+    числа ещё нет (резерв под ещё не отправленный вызов, см. 1.1 доработок)
+    или уже не будет (обрыв стрима до финального usage-чанка, см. 1.3).
+    Никогда не подменяет реальный usage от провайдера, когда он есть."""
+    return _estimate_tokens_from_char_count(len(text) if text else 0)
+
+
+def estimate_messages_tokens(messages: list[dict]) -> int:
+    total_chars = 0
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, str):
+            total_chars += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and isinstance(part.get("text"), str):
+                    total_chars += len(part["text"])
+    return _estimate_tokens_from_char_count(total_chars)
+
+
+def estimate_output_tokens_hint(extra: dict) -> int:
+    """max_tokens/max_completion_tokens клиента, если задан и осмыслен —
+    иначе консервативный дефолт (лучше зарезервировать с запасом и изредка
+    отказать легитимному длинному ответу, чем недорезервировать)."""
+    hint = extra.get("max_tokens") or extra.get("max_completion_tokens")
+    if isinstance(hint, int) and hint > 0:
+        return hint
+    return settings.default_max_output_tokens_estimate
+
+
+def estimate_call_cost_usd(price: ModelPrice | None, messages: list[dict], extra: dict) -> Decimal | None:
+    """Оценка ДО вызова провайдера — для резерва (1.1 доработок). None, если
+    прайса нет (тогда start_call падает обратно на простую проверку balance > 0)."""
+    if price is None:
+        return None
+    usage = UsageAmounts(
+        input_text_tokens=estimate_messages_tokens(messages),
+        output_tokens=estimate_output_tokens_hint(extra),
+    )
+    return compute_cost(price, usage)

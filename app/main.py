@@ -11,13 +11,14 @@ from pathlib import Path
 
 import litellm
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import billing, dlp, llm, pricing, ratelimit, telegram_bot
+from app import billing, dlp, llm, pricing, ratelimit, reaper, telegram_bot
 from app.csrf import CSRFOriginMiddleware
 from app.config import settings
 from app.db import get_session
@@ -65,9 +66,12 @@ async def lifespan(app: FastAPI):
     if settings.telegram_bot_token:
         telegram_task = asyncio.create_task(telegram_bot.poll_loop())
         logger.info("telegram bot polling task started")
+    reaper_task = asyncio.create_task(reaper.reaper_loop())
+    logger.info("stale-pending-event reaper task started")
     yield
     if telegram_task is not None:
         telegram_task.cancel()
+    reaper_task.cancel()
 
 
 app = FastAPI(title="neurohub", lifespan=lifespan)
@@ -872,8 +876,48 @@ _ALLOWED_EXTRA_PARAMS = {
 }
 
 
+def _idempotency_request_hash(model: str, messages: list, prompt_id: int | None) -> str:
+    """Повтор с тем же Idempotency-Key, но ДРУГИМ телом запроса — не должен
+    молча вернуть чужой кэшированный ответ (находка состязательного ревью
+    2026-09-04)."""
+    payload = json.dumps({"model": model, "messages": messages, "prompt_id": prompt_id}, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _replay_idempotent_response(existing: UsageEvent):
+    if existing.status == "pending":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "message": "request with this Idempotency-Key is still processing",
+                    "type": "idempotency_conflict",
+                }
+            },
+        )
+    if existing.response_snapshot is not None:
+        return JSONResponse(
+            status_code=existing.response_status_code or 200,
+            content=json.loads(existing.response_snapshot),
+        )
+    # Стриминговые ответы снапшот не сохраняют (см. _stream_chat_completion) —
+    # честно сообщаем, что повтор для них не воспроизводится байт-в-байт,
+    # а не тихо отдаём пустой/неверный ответ.
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "error": {
+                "message": "request with this Idempotency-Key was already processed "
+                "(streamed responses cannot be replayed)",
+                "type": "idempotency_replay_unavailable",
+            }
+        },
+    )
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(
+    request: Request,
     body: ChatCompletionRequest,
     customer: Customer = Depends(get_customer_by_api_key),
     session: AsyncSession = Depends(get_session),
@@ -922,8 +966,51 @@ async def chat_completions(
 
     billing_customer_id = billing.resolve_billing_customer_id(customer)
 
+    # Идемпотентность (1.4 доработок): Idempotency-Key — обычный HTTP-заголовок
+    # (как у Stripe), не поле тела. По actor'у (customer.id), НЕ по
+    # billing_customer_id — иначе два ребёнка одного родителя делили бы одно
+    # пространство ключей (находка состязательного ревью 2026-09-04).
+    # Проверяем ДО start_call — повтор не должен ни списывать деньги повторно,
+    # ни дублировать вызов провайдера. Хэш тела запроса — чтобы повтор с тем
+    # же ключом, но ДРУГИМ запросом, не вернул молча чужой кэшированный ответ.
+    idempotency_key = (request.headers.get("idempotency-key") or "").strip()[:200] or None
+    request_hash = None
+    if idempotency_key is not None:
+        request_hash = _idempotency_request_hash(body.model, body.messages, body.prompt_id)
+        existing = await billing.find_event_by_idempotency_key(session, customer.id, idempotency_key)
+        if existing is not None:
+            if existing.idempotency_request_hash is not None and existing.idempotency_request_hash != request_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": {
+                            "message": "this Idempotency-Key was already used with a different request",
+                            "type": "idempotency_key_reused",
+                        }
+                    },
+                )
+            return _replay_idempotent_response(existing)
+
+    pricing_cfg = await billing.get_pricing_config(session)
+    reserve_price = await pricing.find_price(session, provider, model, None, None, utcnow())
+    reserve_rub = billing.estimate_reserve_rub(
+        reserve_price,
+        messages,
+        extra,
+        pricing_cfg,
+        extra_fixed_rub=prompt.price_rub if prompt is not None else Decimal(0),
+    )
+
     try:
-        event = await billing.start_call(session, customer.id, billing_customer_id, provider, model)
+        event = await billing.start_call(
+            session,
+            customer.id,
+            billing_customer_id,
+            provider,
+            model,
+            estimated_reserve_rub=reserve_rub,
+            idempotency_key=idempotency_key,
+        )
     except billing.InsufficientBalance as e:
         raise HTTPException(
             status_code=402,
@@ -935,6 +1022,28 @@ async def chat_completions(
                 }
             },
         )
+    except IntegrityError:
+        # Гонка по Idempotency-Key (см. billing.start_call) — ровно один
+        # параллельный запрос с тем же ключом выигрывает INSERT, этот проиграл.
+        # НЕ делаем rollback() здесь и не читаем чужую строку в том же
+        # запросе — тот же урок, что и в start_call/purchase_subscription:
+        # rollback() посреди запроса экспайрит все объекты сессии (включая
+        # customer из auth-зависимости), следующее обращение к ним роняет
+        # MissingGreenlet. Сессия закроется в конце запроса и откатится сама —
+        # проще попросить клиента повторить с тем же ключом, тогда уже
+        # предварительная проверка find_event_by_idempotency_key его найдёт.
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "message": "request with this Idempotency-Key conflicted, please retry",
+                    "type": "idempotency_conflict",
+                }
+            },
+        )
+
+    if idempotency_key is not None:
+        event.idempotency_request_hash = request_hash
 
     if dlp_found:
         event.dlp_redactions = ",".join(sorted(set(dlp_found)))
@@ -954,7 +1063,6 @@ async def chat_completions(
         )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)
-        await billing.finalize_failure(session, event, error_code=type(e).__name__, latency_ms=latency_ms)
         logger.warning("provider call failed for event %s (incl. fallback chain): %r", event.id, e)
         if isinstance(e, litellm.RateLimitError):
             status_code = 503
@@ -962,10 +1070,16 @@ async def chat_completions(
             status_code = 504
         else:
             status_code = 502
-        raise HTTPException(
-            status_code=status_code,
-            detail={"error": {"message": str(e), "type": "provider_error"}},
+        error_detail = {"error": {"message": str(e), "type": "provider_error"}}
+        await billing.finalize_failure(
+            session,
+            event,
+            error_code=type(e).__name__,
+            latency_ms=latency_ms,
+            response_snapshot=json.dumps(error_detail),
+            response_status_code=status_code,
         )
+        raise HTTPException(status_code=status_code, detail=error_detail)
 
     if used_alias != body.model:
         logger.info("event %s served by fallback %s instead of %s", event.id, used_alias, body.model)
@@ -981,7 +1095,7 @@ async def chat_completions(
             "no cost computed for event %s (%s/%s): check model_prices coverage",
             event.id, provider, model,
         )
-    pricing_cfg = await billing.get_pricing_config(session)
+    response_dict = llm.to_dict(response)
     await billing.finalize_success(
         session,
         event,
@@ -992,11 +1106,13 @@ async def chat_completions(
         pricing_cfg=pricing_cfg,
         latency_ms=latency_ms,
         provider_request_id=llm.extract_call_id(response),
+        response_snapshot=json.dumps(response_dict),
+        response_status_code=200,
     )
     if prompt is not None:
         await billing.charge_prompt_fee(session, billing_customer_id, prompt, event.id)
 
-    return llm.to_dict(response)
+    return response_dict
 
 
 async def _stream_chat_completion(
@@ -1013,70 +1129,135 @@ async def _stream_chat_completion(
     последнего чанка отрабатывает в той же сессии, что и start_call.
     Fallback работает только ДО первого чанка (см. llm.chat_completion_with_fallback) —
     обрыв соединения посреди уже отправленного клиенту потока не переигрывается.
-    """
+
+    Обрыв ПОСЛЕ того, как клиенту уже ушла часть контента (1.3 доработок):
+    списываем оценку по факту уже отправленных чанков (usage от провайдера
+    обычно приходит только последним чанком — при обрыве раньше его просто
+    нет), а не 0₽, — иначе можно получить бесплатный частичный ответ, просто
+    оборвав соединение.
+
+    ВАЖНО (найдено состязательным ревью 2026-09-04): реальный разрыв
+    соединения клиентом доставляется в генератор как asyncio.CancelledError
+    или GeneratorExit — оба наследуются от BaseException, НЕ от Exception, и
+    `except Exception` их не ловит. Поэтому биллинг обрыва здесь завязан на
+    внешний `finally`, а не только на `except Exception` — finally отработает
+    при ЛЮБОМ способе выйти из функции, иначе pending-событие и его резерв
+    зависают навсегда (см. billing.start_call — активный резерв не снимается,
+    пока статус не изменится)."""
     stream_kwargs = dict(extra)
     stream_kwargs["stream"] = True
     stream_kwargs.setdefault("stream_options", {"include_usage": True})
 
+    pricing_cfg = await billing.get_pricing_config(session)
     started = time.monotonic()
     usage = pricing.UsageAmounts()
     call_id = None
-    try:
-        used_alias, provider, model, stream = await llm.chat_completion_with_fallback(
-            alias, messages, **stream_kwargs
+    content_so_far = ""
+    provider: str | None = None
+    model: str | None = None
+    finalized = False
+
+    async def _charge_partial_and_close(error_code: str) -> None:
+        nonlocal finalized
+        if finalized:
+            return
+        partial_usage = None
+        partial_cost_usd = None
+        partial_price_id = None
+        if content_so_far and provider is not None and model is not None:
+            partial_price = await pricing.find_price(session, provider, model, None, None, event.created_at)
+            partial_usage = pricing.UsageAmounts(
+                input_text_tokens=pricing.estimate_messages_tokens(messages),
+                output_tokens=pricing.estimate_tokens_from_text(content_so_far),
+            )
+            partial_cost_usd = pricing.compute_cost(partial_price, partial_usage)
+            partial_price_id = partial_price.id if partial_price else None
+        await billing.finalize_failure(
+            session,
+            event,
+            error_code=error_code,
+            latency_ms=int((time.monotonic() - started) * 1000),
+            usage=partial_usage,
+            cost_usd=partial_cost_usd,
+            price_id=partial_price_id,
+            pricing_cfg=pricing_cfg,
+            estimated=bool(partial_usage),
         )
-    except Exception as e:
-        latency_ms = int((time.monotonic() - started) * 1000)
-        await billing.finalize_failure(session, event, error_code=type(e).__name__, latency_ms=latency_ms)
-        logger.warning("provider stream failed to start for event %s (incl. fallback chain): %r", event.id, e)
-        yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'provider_error'}})}\n\n"
-        yield "data: [DONE]\n\n"
-        return
-
-    if used_alias != alias:
-        logger.info("event %s (stream) served by fallback %s instead of %s", event.id, used_alias, alias)
-    event.provider = provider
-    event.model = model
+        finalized = True
 
     try:
-        async for chunk in stream:
-            data = llm.to_dict(chunk)
-            call_id = call_id or data.get("id")
-            chunk_usage = data.get("usage")
-            if chunk_usage:
-                usage = pricing.UsageAmounts(
-                    input_text_tokens=chunk_usage.get("prompt_tokens"),
-                    output_tokens=chunk_usage.get("completion_tokens"),
-                )
-            yield f"data: {json.dumps(data)}\n\n"
-    except Exception as e:
-        latency_ms = int((time.monotonic() - started) * 1000)
-        await billing.finalize_failure(session, event, error_code=type(e).__name__, latency_ms=latency_ms)
-        logger.warning("provider stream interrupted for event %s: %r", event.id, e)
-        yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'provider_error'}})}\n\n"
-        yield "data: [DONE]\n\n"
-        return
+        try:
+            used_alias, provider, model, stream = await llm.chat_completion_with_fallback(
+                alias, messages, **stream_kwargs
+            )
+        except Exception as e:
+            logger.warning("provider stream failed to start for event %s (incl. fallback chain): %r", event.id, e)
+            await _charge_partial_and_close(type(e).__name__)
+            yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'provider_error'}})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
 
-    latency_ms = int((time.monotonic() - started) * 1000)
-    price = await pricing.find_price(session, provider, model, None, None, event.created_at)
-    cost_usd = pricing.compute_cost(price, usage)
-    if cost_usd is None:
-        logger.warning(
-            "no cost computed for streamed event %s (%s/%s): check model_prices coverage or stream_options.include_usage support",
-            event.id, provider, model,
+        if used_alias != alias:
+            logger.info("event %s (stream) served by fallback %s instead of %s", event.id, used_alias, alias)
+        event.provider = provider
+        event.model = model
+
+        try:
+            async for chunk in stream:
+                data = llm.to_dict(chunk)
+                call_id = call_id or data.get("id")
+                for choice in data.get("choices") or []:
+                    delta = choice.get("delta") or {}
+                    delta_content = delta.get("content")
+                    if isinstance(delta_content, str):
+                        content_so_far += delta_content
+                    # tool-calling стримит аргументы функции отдельными
+                    # дельтами, не через delta.content — без этого обрыв
+                    # посреди дорогого tool-call вывода списывался бы 0₽.
+                    for tool_call in delta.get("tool_calls") or []:
+                        args_fragment = ((tool_call or {}).get("function") or {}).get("arguments")
+                        if isinstance(args_fragment, str):
+                            content_so_far += args_fragment
+                chunk_usage = data.get("usage")
+                if chunk_usage:
+                    # extract_chat_usage, а не ручная сборка из двух полей —
+                    # иначе cached_tokens/cache_write_tokens теряются именно
+                    # для стриминга (найдено состязательным ревью 2026-09-04).
+                    usage = llm.extract_chat_usage(data)
+                yield f"data: {json.dumps(data)}\n\n"
+        except Exception as e:
+            logger.warning("provider stream interrupted for event %s: %r", event.id, e)
+            await _charge_partial_and_close(type(e).__name__)
+            yield f"data: {json.dumps({'error': {'message': str(e), 'type': 'provider_error'}})}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        latency_ms = int((time.monotonic() - started) * 1000)
+        price = await pricing.find_price(session, provider, model, None, None, event.created_at)
+        cost_usd = pricing.compute_cost(price, usage)
+        if cost_usd is None:
+            logger.warning(
+                "no cost computed for streamed event %s (%s/%s): check model_prices coverage or stream_options.include_usage support",
+                event.id, provider, model,
+            )
+        await billing.finalize_success(
+            session,
+            event,
+            usage=usage,
+            cost_usd=cost_usd,
+            price_id=price.id if price else None,
+            litellm_cost=None,
+            pricing_cfg=pricing_cfg,
+            latency_ms=latency_ms,
+            provider_request_id=call_id,
         )
-    pricing_cfg = await billing.get_pricing_config(session)
-    await billing.finalize_success(
-        session,
-        event,
-        usage=usage,
-        cost_usd=cost_usd,
-        price_id=price.id if price else None,
-        litellm_cost=None,
-        pricing_cfg=pricing_cfg,
-        latency_ms=latency_ms,
-        provider_request_id=call_id,
-    )
-    if prompt is not None:
-        await billing.charge_prompt_fee(session, billing_customer_id, prompt, event.id)
-    yield "data: [DONE]\n\n"
+        finalized = True
+        if prompt is not None:
+            await billing.charge_prompt_fee(session, billing_customer_id, prompt, event.id)
+        yield "data: [DONE]\n\n"
+    finally:
+        if not finalized:
+            # Сюда попадаем при реальном обрыве соединения (CancelledError/
+            # GeneratorExit) — yield здесь запрещён (генератор закрывается),
+            # только фиксируем биллинг, чтобы резерв не завис навсегда.
+            await _charge_partial_and_close("ClientDisconnected")

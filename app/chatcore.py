@@ -15,7 +15,7 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     для детских аккаунтов), возвращает текст ответа ассистента. Бросает
     billing.InsufficientBalance/KeyError (неизвестная модель) — вызывающий
     код сам решает, как это показать пользователю."""
-    from app.models import Customer  # локальный импорт — избежать цикла на уровне модуля
+    from app.models import Customer, utcnow  # локальный импорт — избежать цикла на уровне модуля
 
     customer = await session.get(Customer, customer_id)
     billing_customer_id = billing.resolve_billing_customer_id(customer)
@@ -23,7 +23,17 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
 
     redacted_messages, dlp_found = dlp.redact_messages(messages)
 
-    event = await billing.start_call(session, customer_id, billing_customer_id, provider, model)
+    pricing_cfg = await billing.get_pricing_config(session)
+    # Оценка ДО вызова — по ИСХОДНО запрошенной модели, для резерва (1.1).
+    # Реальный провайдер/модель, что фактически ответит, известен только
+    # после fallback (llm.chat_completion_with_fallback) — цену для
+    # ФАКТИЧЕСКОГО списания резолвим заново ниже, не переиспользуем эту.
+    estimate_price = await pricing.find_price(session, provider, model, None, None, utcnow())
+    reserve_rub = billing.estimate_reserve_rub(estimate_price, redacted_messages, {}, pricing_cfg)
+
+    event = await billing.start_call(
+        session, customer_id, billing_customer_id, provider, model, estimated_reserve_rub=reserve_rub
+    )
     if dlp_found:
         event.dlp_redactions = ",".join(sorted(set(dlp_found)))
 
@@ -43,7 +53,6 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     usage = llm.extract_chat_usage(response)
     price = await pricing.find_price(session, provider, model, None, None, event.created_at)
     cost_usd = pricing.compute_cost(price, usage)
-    pricing_cfg = await billing.get_pricing_config(session)
     await billing.finalize_success(
         session,
         event,

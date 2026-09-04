@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
 )
@@ -89,6 +90,10 @@ class ModelPrice(Base):
     price_per_1m_input_image_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     price_per_1m_output_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     price_per_1m_cached_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    # Запись в кэш (Anthropic prompt caching) — обычно ДОРОЖЕ обычного input,
+    # в отличие от чтения кэша (price_per_1m_cached_tokens). Раздельно от
+    # чтения намеренно — иначе на длинных кэшированных контекстах прямой убыток.
+    price_per_1m_cache_write_tokens: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     currency: Mapped[str] = mapped_column(Text, default="USD", server_default="USD")
     valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -120,6 +125,11 @@ class UsageEvent(Base):
     __tablename__ = "usage_events"
     __table_args__ = (
         CheckConstraint("status IN ('pending','success','failed')", name="ck_usage_events_status"),
+        # По actor'у (customer_id), не по billing_customer_id: два разных
+        # ребёнка одного родителя делят billing_customer_id, но не должны
+        # видеть чужой ответ при случайном совпадении ключа (см. CLAUDE.md,
+        # находка состязательного ревью 2026-09-04).
+        UniqueConstraint("customer_id", "idempotency_key", name="uq_usage_events_customer_idempotency_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -130,6 +140,7 @@ class UsageEvent(Base):
     prompt_id: Mapped[int | None] = mapped_column(ForeignKey("prompts.id"))
     input_tokens: Mapped[int | None] = mapped_column(Integer)
     cached_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_write_tokens: Mapped[int | None] = mapped_column(Integer)
     output_tokens: Mapped[int | None] = mapped_column(Integer)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
     price_id: Mapped[int | None] = mapped_column(ForeignKey("model_prices.id"))
@@ -137,11 +148,35 @@ class UsageEvent(Base):
     markup_percent: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
     usd_rub_rate: Mapped[Decimal | None] = mapped_column(Numeric(10, 4))
     charged_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    # Оценка (1.1/1.3 доработок): сколько зарезервировано под ЕЩЁ выполняющийся
+    # вызов (status='pending') — по max_tokens/эвристике, ДО фактического
+    # ответа провайдера. Как только статус меняется на success/failed, строка
+    # перестаёт учитываться в сумме активных резервов сама по себе — отдельный
+    # шаг "снять резерв" не нужен.
+    reserved_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    # True — charged_rub посчитан НЕ по подтверждённому usage от провайдера, а
+    # по нашей оценке (см. billing.finalize_failure): обрыв стрима после того,
+    # как клиенту уже ушла часть ответа. Помечаем отдельно, чтобы сверка (1.5)
+    # не путала это с обычным success.
+    billing_estimated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     dlp_redactions: Mapped[str | None] = mapped_column(Text)
     latency_ms: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(Text, default="pending", server_default="pending")
     error_code: Mapped[str | None] = mapped_column(Text)
     provider_request_id: Mapped[str | None] = mapped_column(Text)
+    # Идемпотентность (1.4 доработок): клиент передаёт Idempotency-Key, повтор
+    # с тем же ключом возвращает response_snapshot/response_status_code
+    # первой попытки вместо повторного вызова провайдера и списания.
+    # UNIQUE(customer_id, idempotency_key) — NULL не участвует в уникальности
+    # (и в Postgres, и в SQLite), так что обычные вызовы без ключа никак не
+    # ограничены.
+    idempotency_key: Mapped[str | None] = mapped_column(Text)
+    # Хэш (model, messages, prompt_id) исходного запроса — при повторе с тем
+    # же ключом, но ДРУГИМ телом запроса, отдаём 409, а не чужой кэшированный
+    # ответ молча (находка состязательного ревью 2026-09-04).
+    idempotency_request_hash: Mapped[str | None] = mapped_column(Text)
+    response_snapshot: Mapped[str | None] = mapped_column(Text)
+    response_status_code: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now(), index=True
     )

@@ -3,18 +3,22 @@
 В отличие от AI-HUB/gateway (фиксированная цена операции списывается ДО
 вызова), здесь клиент сам выбирает модель — точная стоимость известна только
 ПОСЛЕ ответа провайдера (зависит от длины completion). Поэтому: перед
-вызовом только проверяем balance_rub > 0 (не списываем), после вызова
-списываем по факту (себестоимость * наценка * курс). Баланс может ненадолго
-уйти в минус на последнем вызове — следующий вызов уже блокируется этой же
-проверкой. Ledger append-only, как везде в этом кодовом кусте.
+вызовом резервируем ОЦЕНОЧНУЮ сумму (см. start_call/1.1 доработок), после —
+списываем по факту (себестоимость * наценка * курс), резерв снимается сам —
+строка перестаёт быть 'pending'. Баланс может ненадолго уйти в минус на
+последнем вызове — следующий вызов уже блокируется той же проверкой. Ledger
+append-only, как везде в этом кодовом кусте.
 """
 
 from decimal import Decimal
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models import (
     Customer,
+    ModelPrice,
     PricingConfig,
     Product,
     Prompt,
@@ -24,7 +28,7 @@ from app.models import (
     WalletLedger,
     utcnow,
 )
-from app.pricing import UsageAmounts
+from app.pricing import UsageAmounts, estimate_call_cost_usd
 
 _RUB_QUANT = Decimal("0.0001")
 
@@ -49,21 +53,90 @@ def resolve_billing_customer_id(customer: Customer) -> int:
     return customer.parent_customer_id if customer.is_child and customer.parent_customer_id else customer.id
 
 
+async def find_event_by_idempotency_key(
+    session: AsyncSession, actor_customer_id: int, idempotency_key: str
+) -> UsageEvent | None:
+    """По actor'у (customer_id), НЕ по billing_customer_id — иначе два разных
+    ребёнка одного родителя делили бы одно пространство ключей идемпотентности
+    и могли бы получить чужой кэшированный ответ (находка состязательного
+    ревью 2026-09-04)."""
+    return (
+        await session.execute(
+            select(UsageEvent).where(
+                UsageEvent.customer_id == actor_customer_id,
+                UsageEvent.idempotency_key == idempotency_key,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def estimate_reserve_rub(
+    price: ModelPrice | None,
+    messages: list[dict],
+    extra: dict,
+    pricing_cfg: PricingConfig,
+    extra_fixed_rub: Decimal = Decimal(0),
+) -> Decimal:
+    """Резерв под вызов (1.1) — с запасом (settings.reserve_safety_margin),
+    покрывающим известную недооценку грубой эвристики (~4 симв/токен занижает
+    не-латинские языки типа кириллицы, основного языка клиентов) и премию за
+    запись в кэш, которую оценка не учитывает по составу. Если прайса вообще
+    нет — НЕ считаем резерв нулевым (это отключает защиту резервом целиком
+    именно для непроцененной модели, ровно как найдено состязательным ревью
+    2026-09-04) — берём консервативный дефолт settings.fallback_reserve_rub_when_unpriced.
+    extra_fixed_rub — для фиксированных доплат сверх токенной стоимости
+    (например Prompt.price_rub), чтобы такие доплаты тоже попадали под
+    защиту резервом, а не списывались бесконтрольно постфактум."""
+    cost_usd = estimate_call_cost_usd(price, messages, extra) if price is not None else None
+    if cost_usd is not None:
+        base_rub = price_in_rub(cost_usd, pricing_cfg)
+    else:
+        base_rub = Decimal(str(settings.fallback_reserve_rub_when_unpriced))
+    margin = Decimal(str(settings.reserve_safety_margin))
+    return (base_rub * margin + extra_fixed_rub).quantize(_RUB_QUANT)
+
+
 async def start_call(
-    session: AsyncSession, actor_customer_id: int, billing_customer_id: int, provider: str, model: str
+    session: AsyncSession,
+    actor_customer_id: int,
+    billing_customer_id: int,
+    provider: str,
+    model: str,
+    estimated_reserve_rub: Decimal,
+    idempotency_key: str | None = None,
 ) -> UsageEvent:
-    """Транзакция 1: проверить баланс ПЛАТЕЛЬЩИКА > 0, создать pending-событие
-    с actor_customer_id (кто реально вызвал) отдельно от billing_customer_id
-    (с чьего баланса спишется — для детских аккаунтов это родитель).
-    Коммитит сама."""
+    """Транзакция 1: проверить баланс ПЛАТЕЛЬЩИКА (1.1 доработок — с учётом
+    уже зарезервированного под ДРУГИЕ ещё не завершённые вызовы того же
+    плательщика, не только balance_rub > 0 — иначе N параллельных запросов
+    проходят каждый по отдельности, суммарно уводя баланс далеко в минус),
+    создать pending-событие с actor_customer_id (кто реально вызвал) отдельно
+    от billing_customer_id (с чьего баланса спишется — для детских аккаунтов
+    это родитель). Коммитит сама.
+
+    UNIQUE(customer_id, idempotency_key) в схеме — при гонке двух запросов
+    с одним и тем же ключом ровно один пройдёт INSERT, второй получит
+    IntegrityError; main.py ловит его и отвечает 409 "повторите" — НЕ читает
+    выигравшую строку в том же запросе (rollback() посреди запроса экспайрит
+    все объекты сессии, включая customer из auth-зависимости — тот же урок,
+    что и с InsufficientBalance выше). Предварительный find_event_by_idempotency_key
+    не закрывает эту гонку (TOCTOU), только страхует типичный случай."""
     payer = await session.get(Customer, billing_customer_id, with_for_update=True)
-    if payer.balance_rub <= 0:
+    active_reserved = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.reserved_rub), 0)).where(
+                UsageEvent.billing_customer_id == billing_customer_id,
+                UsageEvent.status == "pending",
+            )
+        )
+    ).scalar_one()
+    available = payer.balance_rub - active_reserved
+    if payer.balance_rub <= 0 or available < estimated_reserve_rub:
         # Намеренно НЕ делаем rollback здесь: он экспайрит вообще все объекты
         # в сессии (включая customer из Depends(get_current_customer) и любые
         # другие уже загруженные в этом запросе) — следующее же обращение к
         # их атрибутам роняет MissingGreenlet. FOR UPDATE-лок снимется сам,
         # когда FastAPI закроет сессию в конце запроса — это безопаснее.
-        raise InsufficientBalance(payer.balance_rub)
+        raise InsufficientBalance(available, required=estimated_reserve_rub)
 
     event = UsageEvent(
         customer_id=actor_customer_id,
@@ -71,6 +144,8 @@ async def start_call(
         provider=provider,
         model=model,
         status="pending",
+        reserved_rub=estimated_reserve_rub,
+        idempotency_key=idempotency_key,
     )
     session.add(event)
     await session.commit()
@@ -92,12 +167,18 @@ async def finalize_success(
     pricing_cfg: PricingConfig,
     latency_ms: int,
     provider_request_id: str | None,
+    response_snapshot: str | None = None,
+    response_status_code: int | None = None,
 ) -> Decimal:
-    """Транзакция 2 (успех): списать по факту, вернуть новый баланс."""
+    """Транзакция 2 (успех): списать по факту, вернуть новый баланс.
+    response_snapshot/response_status_code — для идемпотентного повтора
+    (1.4 доработок): main.py передаёт JSON тела ответа, чтобы вернуть его же
+    клиенту при повторе с тем же Idempotency-Key, не вызывая провайдера снова."""
     charged_rub = price_in_rub(cost_usd, pricing_cfg) if cost_usd is not None else None
 
     event.input_tokens = usage.input_text_tokens
     event.cached_tokens = usage.cached_tokens
+    event.cache_write_tokens = usage.cache_write_tokens
     event.output_tokens = usage.output_tokens
     event.cost_usd = cost_usd
     event.price_id = price_id
@@ -108,6 +189,8 @@ async def finalize_success(
     event.latency_ms = latency_ms
     event.status = "success"
     event.provider_request_id = provider_request_id
+    event.response_snapshot = response_snapshot
+    event.response_status_code = response_status_code
     event.completed_at = utcnow()
     session.add(event)
 
@@ -127,16 +210,63 @@ async def finalize_success(
 
 
 async def finalize_failure(
-    session: AsyncSession, event: UsageEvent, *, error_code: str, latency_ms: int
-) -> None:
-    """Транзакция 2 (ошибка провайдера): деньги не списывались — просто
-    закрыть событие как failed."""
+    session: AsyncSession,
+    event: UsageEvent,
+    *,
+    error_code: str,
+    latency_ms: int,
+    usage: UsageAmounts | None = None,
+    cost_usd: Decimal | None = None,
+    price_id: int | None = None,
+    pricing_cfg: PricingConfig | None = None,
+    estimated: bool = False,
+    response_snapshot: str | None = None,
+    response_status_code: int | None = None,
+) -> Decimal | None:
+    """Транзакция 2 (ошибка/обрыв): по умолчанию деньги не списывались —
+    просто закрыть событие как failed. НО если поток успел отдать клиенту
+    часть ответа ДО обрыва (usage/cost_usd переданы — см. 1.3 доработок),
+    списываем по оценке этого объёма: иначе клиент получает бесплатный
+    частичный ответ, просто оборвав соединение. estimated=True в этом
+    случае — сверка (1.5) должна отличать это от подтверждённого usage."""
     event.status = "failed"
     event.error_code = error_code
     event.latency_ms = latency_ms
+    event.response_snapshot = response_snapshot
+    event.response_status_code = response_status_code
     event.completed_at = utcnow()
+
+    charged_rub = price_in_rub(cost_usd, pricing_cfg) if cost_usd is not None and pricing_cfg is not None else None
+    if usage is not None and charged_rub is not None:
+        event.input_tokens = usage.input_text_tokens
+        event.cached_tokens = usage.cached_tokens
+        event.cache_write_tokens = usage.cache_write_tokens
+        event.output_tokens = usage.output_tokens
+        event.cost_usd = cost_usd
+        event.price_id = price_id
+        event.markup_percent = pricing_cfg.markup_percent
+        event.usd_rub_rate = pricing_cfg.usd_rub_rate
+        event.charged_rub = charged_rub
+        event.billing_estimated = estimated
     session.add(event)
+
+    if charged_rub is not None:
+        payer = await session.get(Customer, event.billing_customer_id, with_for_update=True)
+        session.add(
+            WalletLedger(
+                customer_id=payer.id,
+                entry_type="usage",
+                delta_rub=-charged_rub,
+                usage_event_id=event.id,
+                note="оценка по обрыву потока" if estimated else None,
+            )
+        )
+        payer.balance_rub -= charged_rub
+        await session.commit()
+        return payer.balance_rub
+
     await session.commit()
+    return None
 
 
 async def confirm_topup(session: AsyncSession, topup: TopupRequest, admin_id: int) -> Decimal:
