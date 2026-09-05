@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Сверка — Flawless{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<div class="row" style="justify-content:space-between;margin-bottom:8px;">
+  <h1 style="font-size:26px;">Сверка за день</h1>
+  <a href="/admin/overview" style="font-size:14px;font-weight:600;">← Обзор</a>
+</div>
+
+<div class="row" style="gap:14px;margin-bottom:24px;">
+  <a href="/admin/reconciliation?d={{ prev_day.isoformat() }}" style="font-size:14px;">← {{ prev_day.strftime("%d.%m.%Y") }}</a>
+  <span class="mono" style="font-size:16px;font-weight:700;">{{ day.strftime("%d.%m.%Y") }}</span>
+  {% if not is_today %}
+  <a href="/admin/reconciliation?d={{ next_day.isoformat() }}" style="font-size:14px;">{{ next_day.strftime("%d.%m.%Y") }} →</a>
+  {% endif %}
+</div>
+
+<p class="muted" style="margin-bottom:24px;max-width:720px;">Нет прямой интеграции с биллингом провайдера (депозит не подключён) — вместо
+«наша выручка против списания с депозита провайдера» сверяем себестоимость двумя независимыми
+способами, которые уже считаются на каждый вызов: наша <code>cost_usd</code> (по таблице
+model_prices) против <code>litellm_cost</code> (встроенная контрольная оценка LiteLLM).
+Большое расхождение — сигнал устаревшего прайса, не факт перерасхода у провайдера.</p>
+
+<div style="display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:16px;margin-bottom:20px;">
+  <div class="card" style="margin-bottom:0;">
+    <div class="muted">Выручка за день</div>
+    <div class="stat" style="font-size:22px;color:var(--accent-2);">{{ "%.4f"|format(revenue) }} ₽</div>
+    <div class="muted" style="font-size:12px;">{{ total_count }} вызовов</div>
+  </div>
+  <div class="card" style="margin-bottom:0;">
+    <div class="muted">Себестоимость</div>
+    <div class="stat" style="font-size:22px;">{{ "%.4f"|format(cost) }} ₽</div>
+  </div>
+  <div class="card" style="margin-bottom:0;{% if low_margin %}border-color:var(--bad);{% else %}border-color:var(--accent);{% endif %}">
+    <div class="muted">Маржа</div>
+    <div class="stat" style="font-size:22px;{% if low_margin %}color:var(--bad);{% else %}color:var(--accent-hi);{% endif %}">{{ "%.4f"|format(margin) }} ₽</div>
+    {% if margin_pct is not none %}
+    <div class="muted" style="font-size:12px;{% if low_margin %}color:var(--bad);{% endif %}">{{ "%.1f"|format(margin_pct) }}%{% if low_margin %} — ниже порога {{ "%.0f"|format(settings.margin_alert_threshold_pct) }}%{% endif %}</div>
+    {% endif %}
+  </div>
+  <div class="card" style="margin-bottom:0;{% if high_discrepancy %}border-color:var(--bad);{% endif %}">
+    <div class="muted">Расхождение с litellm_cost</div>
+    {% if discrepancy_pct is not none %}
+    <div class="stat" style="font-size:22px;{% if high_discrepancy %}color:var(--bad);{% endif %}">{{ "%.1f"|format(discrepancy_pct) }}%</div>
+    <div class="muted" style="font-size:12px;">по {{ litellm_covered_count }} из {{ total_count }} вызовов с контрольным значением</div>
+    {% else %}
+    <div class="stat" style="font-size:22px;color:var(--text-faint);">—</div>
+    <div class="muted" style="font-size:12px;">ни один вызов за день не дал litellm_cost (обычно — все были стримингом)</div>
+    {% endif %}
+  </div>
+</div>
+
+{% if high_discrepancy %}
+<div class="card" style="border-color:var(--bad);margin-bottom:20px;">
+  <span class="badge badge-bad" style="margin-right:8px;">⚠ сигнал</span>
+  Расхождение между нашей себестоимостью и контрольным litellm_cost за день — {{ "%.1f"|format(discrepancy_pct) }}%, выше порога {{ "%.0f"|format(settings.cost_discrepancy_alert_threshold_pct) }}%. Проверьте актуальность цен в <code>model_prices</code> для моделей ниже.
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="font-size:16px;margin-bottom:16px;">По моделям за {{ day.strftime("%d.%m.%Y") }}</h3>
+  {% if not by_model %}
+  <p class="muted">Вызовов с реальным списанием в этот день не было.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Модель</th><th>Вызовов</th><th>Выручка</th><th>Себестоимость</th><th>Маржа</th><th>Маржа %</th></tr></thead>
+    <tbody>
+    {% for m in by_model %}
+    <tr{% if m.low_margin %} style="background:var(--badge-bad-bg);"{% endif %}>
+      <td class="mono">{{ m.model }}</td>
+      <td class="mono">{{ m.count }}</td>
+      <td class="mono">{{ "%.4f"|format(m.revenue) }} ₽</td>
+      <td class="mono">{{ "%.4f"|format(m.cost) }} ₽</td>
+      <td class="mono">{{ "%.4f"|format(m.margin) }} ₽</td>
+      <td class="mono">
+        {% if m.margin_pct is not none %}
+        <span {% if m.low_margin %}style="color:var(--bad);font-weight:700;"{% endif %}>{{ "%.1f"|format(m.margin_pct) }}%</span>
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+</div>
+{% endblock %}

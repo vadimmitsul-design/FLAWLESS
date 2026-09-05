@@ -2,7 +2,10 @@
 {% block title %}Обзор — Flawless{% endblock %}
 {% block content %}
 <div class="wrap" style="padding:40px 32px 80px;">
-<h1 style="font-size:26px;margin-bottom:24px;">Бизнес-обзор</h1>
+<div class="row" style="justify-content:space-between;margin-bottom:24px;">
+  <h1 style="font-size:26px;">Бизнес-обзор</h1>
+  <a href="/admin/reconciliation" style="font-size:14px;font-weight:600;">Сверка по дням →</a>
+</div>
 
 <div style="display:grid;grid-template-columns:repeat(5, minmax(0, 1fr));gap:16px;margin-bottom:20px;">
   <div class="card" style="margin-bottom:0;">
@@ -29,27 +32,35 @@
 
 <p class="muted">Клиентов: {{ customer_count }}{% if failed_events %} · неудачных вызовов: {{ failed_events }}{% endif %}{% if uncosted_events %} · <span style="color:var(--bad);">вызовов без себестоимости: {{ uncosted_events }} (нет строки в model_prices — проверить покрытие)</span>{% endif %}</p>
 
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
-  <div class="card" style="margin-bottom:0;">
-    <h3 style="font-size:16px;margin-bottom:16px;">По моделям</h3>
-    {% if not by_model %}
-    <p class="muted">Пока нет успешных вызовов.</p>
-    {% else %}
-    <table>
-      <thead><tr><th>Модель</th><th>Вызовов</th><th>Начислено</th></tr></thead>
-      <tbody>
-      {% for model, count, charged in by_model %}
-      <tr>
-        <td class="mono">{{ model }}</td>
-        <td class="mono">{{ count }}</td>
-        <td class="mono">{{ "%.4f"|format(charged) }} ₽</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-  </div>
+<div class="card">
+  <h3 style="font-size:16px;margin-bottom:4px;">Маржа по моделям</h3>
+  <p class="muted" style="margin-top:0;">За всё время. Подсвечено — маржа ниже {{ "%.0f"|format(settings.margin_alert_threshold_pct) }}% или отрицательная: изменение цены у поставщика (или ошибка в прайсе) не должно тонуть в общем среднем.</p>
+  {% if not by_model %}
+  <p class="muted">Пока нет оплаченных вызовов.</p>
+  {% else %}
+  <table>
+    <thead><tr><th>Модель</th><th>Вызовов</th><th>Выручка</th><th>Себестоимость</th><th>Маржа</th><th>Маржа %</th></tr></thead>
+    <tbody>
+    {% for m in by_model %}
+    <tr{% if m.low_margin %} style="background:var(--badge-bad-bg);"{% endif %}>
+      <td class="mono">{{ m.model }}</td>
+      <td class="mono">{{ m.count }}</td>
+      <td class="mono">{{ "%.4f"|format(m.revenue) }} ₽</td>
+      <td class="mono">{{ "%.4f"|format(m.cost) }} ₽</td>
+      <td class="mono">{{ "%.4f"|format(m.margin) }} ₽</td>
+      <td class="mono">
+        {% if m.margin_pct is not none %}
+        <span {% if m.low_margin %}style="color:var(--bad);font-weight:700;"{% endif %}>{{ "%.1f"|format(m.margin_pct) }}%</span>
+        {% else %}—{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
 
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
   <div class="card" style="margin-bottom:0;">
     <h3 style="font-size:16px;margin-bottom:16px;">Последние регистрации</h3>
     {% if not recent_customers %}

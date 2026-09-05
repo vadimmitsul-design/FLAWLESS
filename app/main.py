@@ -7,6 +7,7 @@ import secrets
 import time
 import contextlib
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -672,10 +673,13 @@ async def admin_overview(
         )
     ).scalar_one()
     # Себестоимость у провайдеров, переведённая в рубли по курсу на момент вызова.
+    # По charged_rub IS NOT NULL, не по status=='success' — событие с честным
+    # списанием по оценке при обрыве стрима (1.3 доработок, billing_estimated)
+    # имеет status='failed', но реальная себестоимость и списание у него есть.
     cost_rub = (
         await session.execute(
             select(func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0)).where(
-                UsageEvent.status == "success"
+                UsageEvent.charged_rub.is_not(None)
             )
         )
     ).scalar_one()
@@ -693,18 +697,37 @@ async def admin_overview(
         )
     ).scalar_one()
 
-    by_model = (
+    # 1.6 доработок: маржа по каждой модели, не только общая — изменение
+    # цены у поставщика (или ошибка в model_prices) должно быть видно
+    # по конкретной модели, а не тонуть в среднем по больнице.
+    by_model_rows = (
         await session.execute(
             select(
                 UsageEvent.model,
                 func.count(UsageEvent.id),
                 func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+                func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0),
             )
-            .where(UsageEvent.status == "success")
+            .where(UsageEvent.charged_rub.is_not(None))
             .group_by(UsageEvent.model)
             .order_by(func.count(UsageEvent.id).desc())
         )
     ).all()
+    by_model = []
+    for model, count, revenue, cost in by_model_rows:
+        margin = revenue - cost
+        margin_pct = (margin / revenue * 100) if revenue else None
+        by_model.append(
+            {
+                "model": model,
+                "count": count,
+                "revenue": revenue,
+                "cost": cost,
+                "margin": margin,
+                "margin_pct": margin_pct,
+                "low_margin": margin_pct is not None and margin_pct < settings.margin_alert_threshold_pct,
+            }
+        )
 
     recent_customers = (
         await session.execute(
@@ -720,6 +743,7 @@ async def admin_overview(
         "admin_overview.html",
         {
             "customer": customer,
+            "settings": settings,
             "total_topped_up": total_topped_up,
             "outstanding_balance": outstanding_balance,
             "recognized_revenue": recognized_revenue,
@@ -730,6 +754,136 @@ async def admin_overview(
             "uncosted_events": uncosted_events,
             "by_model": by_model,
             "recent_customers": recent_customers,
+        },
+    )
+
+
+@app.get("/admin/reconciliation")
+async def admin_reconciliation(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    d: str | None = None,
+):
+    """1.5 доработок: ежедневная сверка. У нас нет реальной интеграции с
+    биллингом провайдера (депозит и т.п. — не подключены), поэтому сверяем
+    себестоимость ДВУМЯ независимыми способами, которые уже считаются на
+    каждый вызов: наша cost_usd (по своей таблице model_prices) против
+    litellm_cost (встроенная оценка LiteLLM, контрольное значение) — большое
+    расхождение сигналит об устаревшем прайсе, а не о реальном перерасходе
+    у поставщика. litellm_cost не пишется для стримингового успеха (main.py,
+    _stream_chat_completion) — только для нестримингового пути и Telegram,
+    поэтому покрытие частичное, это явно показано в отчёте."""
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+
+    if d:
+        try:
+            day = datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    else:
+        day = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+    day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    charged_today = UsageEvent.charged_rub.is_not(None) & (UsageEvent.created_at >= day_start) & (
+        UsageEvent.created_at < day_end
+    )
+
+    revenue = (
+        await session.execute(select(func.coalesce(func.sum(UsageEvent.charged_rub), 0)).where(charged_today))
+    ).scalar_one()
+    cost = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0)).where(charged_today)
+        )
+    ).scalar_one()
+    total_count = (
+        await session.execute(select(func.count(UsageEvent.id)).where(charged_today))
+    ).scalar_one()
+
+    litellm_covered = charged_today & UsageEvent.litellm_cost.is_not(None)
+    litellm_cost_rub = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.litellm_cost * UsageEvent.usd_rub_rate), 0)).where(
+                litellm_covered
+            )
+        )
+    ).scalar_one()
+    cost_for_covered = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0)).where(litellm_covered)
+        )
+    ).scalar_one()
+    litellm_covered_count = (
+        await session.execute(select(func.count(UsageEvent.id)).where(litellm_covered))
+    ).scalar_one()
+
+    discrepancy_rub = cost_for_covered - litellm_cost_rub
+    discrepancy_pct = (discrepancy_rub / litellm_cost_rub * 100) if litellm_cost_rub else None
+    high_discrepancy = (
+        discrepancy_pct is not None and abs(discrepancy_pct) > settings.cost_discrepancy_alert_threshold_pct
+    )
+
+    margin = revenue - cost
+    margin_pct = (margin / revenue * 100) if revenue else None
+    low_margin = margin_pct is not None and margin_pct < settings.margin_alert_threshold_pct
+
+    by_model_rows = (
+        await session.execute(
+            select(
+                UsageEvent.model,
+                func.count(UsageEvent.id),
+                func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+                func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0),
+            )
+            .where(charged_today)
+            .group_by(UsageEvent.model)
+            .order_by(func.count(UsageEvent.id).desc())
+        )
+    ).all()
+    by_model = []
+    for model, count, model_revenue, model_cost in by_model_rows:
+        model_margin = model_revenue - model_cost
+        model_margin_pct = (model_margin / model_revenue * 100) if model_revenue else None
+        by_model.append(
+            {
+                "model": model,
+                "count": count,
+                "revenue": model_revenue,
+                "cost": model_cost,
+                "margin": model_margin,
+                "margin_pct": model_margin_pct,
+                "low_margin": model_margin_pct is not None
+                and model_margin_pct < settings.margin_alert_threshold_pct,
+            }
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "admin_reconciliation.html",
+        {
+            "customer": customer,
+            "settings": settings,
+            "day": day,
+            "prev_day": day - timedelta(days=1),
+            "next_day": day + timedelta(days=1),
+            "is_today": day >= datetime.now(timezone.utc).date(),
+            "revenue": revenue,
+            "cost": cost,
+            "margin": margin,
+            "margin_pct": margin_pct,
+            "low_margin": low_margin,
+            "total_count": total_count,
+            "litellm_cost_rub": litellm_cost_rub,
+            "cost_for_covered": cost_for_covered,
+            "discrepancy_rub": discrepancy_rub,
+            "discrepancy_pct": discrepancy_pct,
+            "high_discrepancy": high_discrepancy,
+            "litellm_covered_count": litellm_covered_count,
+            "by_model": by_model,
         },
     )
 

@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     # С запасом над llm_num_retries * llm_timeout_seconds (сейчас 2*120=240с).
     stale_pending_reap_after_seconds: int = 600
     reaper_interval_seconds: int = 120
+    # Контроль маржи по моделям (1.6 доработок) — ниже этого % (или отрицательная)
+    # маржа подсвечивается в /admin/overview и /admin/reconciliation как сигнал,
+    # а не тонет тихо в среднем по всем моделям.
+    margin_alert_threshold_pct: float = 15.0
+    # Сверка с поставщиком (1.5 доработок) — расхождение между нашей себестоимостью
+    # (model_prices) и контрольным litellm_cost выше этого % подсвечивается за день.
+    cost_discrepancy_alert_threshold_pct: float = 10.0
 
 
 settings = Settings()
