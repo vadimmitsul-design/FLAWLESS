@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}neurohub — единый API для GPT, Claude и Gemini{% endblock %}
+{% block title %}Flawless — единый API для GPT, Claude и Gemini{% endblock %}
 {% block content %}
 <div style="position:relative;overflow:hidden;">
 
@@ -9,7 +9,7 @@
     <div class="wrap" style="height:76px;display:flex;align-items:center;justify-content:space-between;">
       <div class="logo">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="4" r="1.8"/><circle cx="19.5" cy="16" r="1.8"/><circle cx="4.5" cy="16" r="1.8"/><line x1="12" y1="9.4" x2="12" y2="5.8"/><line x1="14.2" y1="13.4" x2="18" y2="15.3"/><line x1="9.8" y1="13.4" x2="6" y2="15.3"/></svg>
-        <span style="font-size:20px;">neurohub</span>
+        <span class="wordmark" style="font-size:20px;">Flawless</span>
       </div>
       <div style="display:flex;align-items:center;gap:36px;">
         <a href="#features" style="font-size:15px;font-weight:600;color:var(--text-dim);">Возможности</a>
@@ -42,7 +42,7 @@
       <div style="padding:12px 18px;border-bottom:1px solid var(--border);">
         <span class="mono" style="font-size:13px;color:var(--text-faint);">curl</span>
       </div>
-      <pre class="mono" style="margin:0;padding:22px;font-size:13.5px;line-height:1.7;color:var(--text-dim);overflow-x:auto;">curl https://api.neurohub.ru/v1/chat/completions \
+      <pre class="mono" style="margin:0;padding:22px;font-size:13.5px;line-height:1.7;color:var(--text-dim);overflow-x:auto;">curl https://api.flawless.ru/v1/chat/completions \
   -H "Authorization: Bearer nh_••••••••" \
   -H "Content-Type: application/json" \
   -d '{"model":"claude-sonnet","messages":[{"role":"user","content":"привет"}]}'</pre>
@@ -133,7 +133,7 @@
 
   <div style="border-top:1px solid var(--border);">
     <div class="wrap" style="padding:36px 32px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;">
-      <span style="font-family:'Space Grotesk';font-weight:700;font-size:16px;">neurohub</span>
+      <span class="wordmark" style="font-size:16px;">Flawless</span>
       <div style="display:flex;gap:28px;flex-wrap:wrap;">
         <a href="/login" style="font-size:13.5px;color:var(--text-faint);">Вход</a>
         <a href="/signup" style="font-size:13.5px;color:var(--text-faint);">Регистрация</a>

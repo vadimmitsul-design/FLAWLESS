@@ -69,7 +69,7 @@ async def _handle_update(update: dict) -> None:
             if not code:
                 await send_message(
                     chat_id,
-                    "Привет! Я AI-секретарь neurohub. Получите код привязки в личном кабинете "
+                    "Привет! Я AI-секретарь Flawless. Получите код привязки в личном кабинете "
                     "(раздел «Telegram-секретарь») и отправьте: /start КОД",
                 )
                 return
@@ -98,7 +98,7 @@ async def _handle_update(update: dict) -> None:
         ).scalar_one_or_none()
         if link is None:
             await send_message(
-                chat_id, "Аккаунт не подключён. Получите код в личном кабинете neurohub и отправьте /start КОД"
+                chat_id, "Аккаунт не подключён. Получите код в личном кабинете Flawless и отправьте /start КОД"
             )
             return
 
@@ -127,7 +127,7 @@ async def _handle_update(update: dict) -> None:
                 session, customer.id, settings.telegram_default_model, [{"role": "user", "content": user_text}]
             )
         except billing.InsufficientBalance:
-            await send_message(chat_id, f"{prefix}Недостаточно средств на балансе — пополните в личном кабинете neurohub.")
+            await send_message(chat_id, f"{prefix}Недостаточно средств на балансе — пополните в личном кабинете Flawless.")
             return
         except Exception as e:
             logger.warning("telegram chat turn failed: %r", e)

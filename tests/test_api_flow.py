@@ -57,7 +57,7 @@ def test_signup_login_dashboard(client):
     client.post("/logout")
     r = client.get("/", follow_redirects=False)
     assert r.status_code == 200  # анонимному показывается публичный лендинг
-    assert "neurohub" in r.text
+    assert "Flawless" in r.text
 
 
 def test_duplicate_signup_rejected(client):

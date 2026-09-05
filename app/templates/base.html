@@ -3,8 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}neurohub{% endblock %}</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<title>{% block title %}Flawless{% endblock %}</title>
+<script>
+(function(){
+  try {
+    var stored = localStorage.getItem('theme');
+    if (stored === 'light' || stored === 'dark') {
+      document.documentElement.setAttribute('data-theme', stored);
+    }
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
   :root{
     --bg:oklch(16% 0.020 262);
@@ -20,6 +30,33 @@
     --accent-2:oklch(66% 0.19 191);
     --warn:oklch(78% 0.15 85);
     --bad:oklch(68% 0.18 25);
+    --badge-ok-bg:oklch(66% 0.19 191 / 0.16);
+    --badge-warn-bg:oklch(78% 0.15 85 / 0.16);
+    --badge-bad-bg:oklch(68% 0.18 25 / 0.16);
+    --badge-role-bg:oklch(66% 0.19 291 / 0.16);
+    --btn-on-accent:oklch(15% 0.02 291);
+    --shadow-soft:oklch(10% 0 0 / 0.6);
+  }
+  :root[data-theme="light"]{
+    --bg:oklch(97% 0.008 262);
+    --bg-2:oklch(94% 0.010 262);
+    --surface:oklch(99% 0.004 262);
+    --surface-hi:oklch(95% 0.012 262);
+    --border:oklch(85% 0.014 262);
+    --text:oklch(22% 0.02 262);
+    --text-dim:oklch(42% 0.02 262);
+    --text-faint:oklch(58% 0.016 262);
+    --accent:oklch(52% 0.20 291);
+    --accent-hi:oklch(46% 0.20 291);
+    --accent-2:oklch(46% 0.15 191);
+    --warn:oklch(55% 0.16 85);
+    --bad:oklch(52% 0.20 25);
+    --badge-ok-bg:oklch(46% 0.15 191 / 0.14);
+    --badge-warn-bg:oklch(55% 0.16 85 / 0.14);
+    --badge-bad-bg:oklch(52% 0.20 25 / 0.14);
+    --badge-role-bg:oklch(52% 0.20 291 / 0.14);
+    --btn-on-accent:oklch(99% 0.004 262);
+    --shadow-soft:oklch(60% 0.02 262 / 0.22);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
@@ -33,10 +70,10 @@
   th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-faint);font-weight:700;padding:0 0 12px;}
   td{padding:14px 0;border-top:1px solid var(--border);font-size:14.5px;}
   .badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:99px;font-size:12.5px;font-weight:700;}
-  .badge-ok{background:oklch(66% 0.19 191 / 0.16);color:var(--accent-2);}
-  .badge-warn{background:oklch(78% 0.15 85 / 0.16);color:var(--warn);}
-  .badge-bad{background:oklch(68% 0.18 25 / 0.16);color:var(--bad);}
-  .badge-role{background:oklch(66% 0.19 291 / 0.16);color:var(--accent-hi);}
+  .badge-ok{background:var(--badge-ok-bg);color:var(--accent-2);}
+  .badge-warn{background:var(--badge-warn-bg);color:var(--warn);}
+  .badge-bad{background:var(--badge-bad-bg);color:var(--bad);}
+  .badge-role{background:var(--badge-role-bg);color:var(--accent-hi);}
   form.inline{display:inline;}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:26px;margin-bottom:20px;}
   .stat{font-size:2rem;font-weight:600;font-family:'JetBrains Mono';}
@@ -47,25 +84,27 @@
   textarea{height:auto;padding:12px 14px;}
   input:focus, textarea:focus{border-color:var(--accent);}
   label{display:block;margin-top:0.75rem;font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:6px;}
-  button{width:auto;height:44px;padding:0 20px;border-radius:8px;font-family:'Manrope';font-weight:700;font-size:14.5px;cursor:pointer;border:1px solid transparent;background:var(--accent);color:oklch(15% 0.02 291);}
+  button{width:auto;height:44px;padding:0 20px;border-radius:8px;font-family:'Manrope';font-weight:700;font-size:14.5px;cursor:pointer;border:1px solid transparent;background:var(--accent);color:var(--btn-on-accent);}
   button.secondary{background:transparent;color:var(--text);border-color:var(--border);}
-  button.danger{background:var(--bad);color:oklch(15% 0 0);}
+  button.danger{background:var(--bad);color:var(--btn-on-accent);}
   code{font-family:'JetBrains Mono';background:var(--surface-hi);border:1px solid var(--border);padding:0.2rem 0.5rem;border-radius:6px;font-size:0.9em;word-break:break-all;}
   .row{display:flex;gap:0.75rem;align-items:center;}
   .logo{display:flex;align-items:center;gap:9px;}
   .logo svg{width:22px;height:22px;stroke:var(--accent-hi);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
-  .logo span{font-family:'Space Grotesk';font-weight:700;font-size:17px;}
+  .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;font-style:italic;letter-spacing:-0.01em;color:var(--accent-2);}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent-hi);flex-shrink:0;}
+  .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
 </style>
 </head>
 <body>
+<button type="button" class="theme-toggle" onclick="toggleTheme()" title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
 {% if customer %}
 <div style="border-bottom:1px solid var(--border);">
   <div class="wrap" style="height:68px;display:flex;align-items:center;justify-content:space-between;">
     <div style="display:flex;align-items:center;gap:40px;">
       <a href="/" class="logo" style="color:var(--text);">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="4" r="1.8"/><circle cx="19.5" cy="16" r="1.8"/><circle cx="4.5" cy="16" r="1.8"/><line x1="12" y1="9.4" x2="12" y2="5.8"/><line x1="14.2" y1="13.4" x2="18" y2="15.3"/><line x1="9.8" y1="13.4" x2="6" y2="15.3"/></svg>
-        <span>neurohub</span>
+        <span class="wordmark" style="font-size:19px;">Flawless</span>
       </a>
       <div style="display:flex;gap:28px;">
         <a href="/" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Кабинет</a>
@@ -93,5 +132,20 @@
 </div>
 {% endif %}
 {% block content %}{% endblock %}
+<script>
+function applyThemeIcon(){
+  var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  document.querySelectorAll('.theme-toggle').forEach(function(b){ b.textContent = isLight ? '🌙' : '☀️'; });
+}
+function toggleTheme(){
+  var root = document.documentElement;
+  var current = root.getAttribute('data-theme') || 'dark';
+  var next = current === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('theme', next); } catch (e) {}
+  applyThemeIcon();
+}
+applyThemeIcon();
+</script>
 </body>
 </html>

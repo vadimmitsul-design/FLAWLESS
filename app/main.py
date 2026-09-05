@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
     reaper_task.cancel()
 
 
-app = FastAPI(title="neurohub", lifespan=lifespan)
+app = FastAPI(title="Flawless", lifespan=lifespan)
 app.add_middleware(CSRFOriginMiddleware)
 app.add_middleware(
     SessionMiddleware,
