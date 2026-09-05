@@ -82,7 +82,13 @@
     background:var(--surface-hi);color:var(--text);outline:none;
   }
   textarea{height:auto;padding:12px 14px;}
-  input:focus, textarea:focus{border-color:var(--accent);}
+  input:focus, textarea:focus, select:focus{border-color:var(--accent);}
+  select{
+    appearance:none;-webkit-appearance:none;-moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center;padding-right:34px;
+    cursor:pointer;
+  }
   label{display:block;margin-top:0.75rem;font-size:13px;font-weight:600;color:var(--text-dim);margin-bottom:6px;}
   button{width:auto;height:44px;padding:0 20px;border-radius:8px;font-family:'Manrope';font-weight:700;font-size:14.5px;cursor:pointer;border:1px solid transparent;background:var(--accent);color:var(--btn-on-accent);}
   button.secondary{background:transparent;color:var(--text);border-color:var(--border);}
