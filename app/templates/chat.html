@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Чат — Flawless{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:32px 32px 0;">
+<div style="display:grid;grid-template-columns:260px 1fr;gap:20px;height:calc(100vh - 132px);">
+
+  <div class="card" style="margin-bottom:0;padding:16px;display:flex;flex-direction:column;overflow:hidden;">
+    <a href="/chat" style="display:block;text-align:center;height:38px;line-height:38px;border-radius:8px;background:var(--accent);color:var(--btn-on-accent);font-weight:700;font-size:13.5px;margin-bottom:14px;">+ Новый диалог</a>
+    <div style="overflow-y:auto;flex:1;">
+      {% for c in conversations %}
+      <a href="/chat/{{ c.id }}" style="display:block;padding:10px 10px;border-radius:8px;margin-bottom:4px;{% if active_conversation and active_conversation.id == c.id %}background:var(--surface-hi);{% endif %}">
+        <div style="font-size:13.5px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ c.title or "Новый диалог" }}</div>
+        <div class="mono muted" style="font-size:11.5px;margin-top:2px;">{{ c.model_alias }}</div>
+      </a>
+      {% else %}
+      <p class="muted" style="font-size:13px;">Диалогов пока нет.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card" style="margin-bottom:0;padding:0;display:flex;flex-direction:column;overflow:hidden;">
+    <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <select id="chat-model" style="width:220px;height:36px;font-size:13.5px;">
+        {% for m in models %}
+        <option value="{{ m }}" {% if active_conversation and active_conversation.model_alias == m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+      <span class="muted" style="font-size:13px;">Баланс: {{ "%.2f"|format(customer.balance_rub) }} ₽</span>
+    </div>
+
+    <div id="chat-log" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;">
+      {% for m in chat_messages %}
+      <div style="max-width:78%;align-self:{{ 'flex-end' if m.role == 'user' else 'flex-start' }};">
+        <div style="background:{{ 'var(--accent)' if m.role == 'user' else 'var(--surface-hi)' }};color:{{ 'var(--btn-on-accent)' if m.role == 'user' else 'var(--text)' }};border-radius:12px;padding:10px 14px;font-size:14.5px;line-height:1.5;white-space:pre-wrap;">{{ m.text }}</div>
+        {% if m.attachment_name %}<div class="muted" style="font-size:11.5px;margin-top:4px;">📎 {{ m.attachment_name }}</div>{% endif %}
+      </div>
+      {% else %}
+      <p class="muted" style="text-align:center;margin-top:40px;">Задайте вопрос любой из подключённых моделей — GPT, Claude или Gemini.</p>
+      {% endfor %}
+    </div>
+
+    <form id="chat-form" style="padding:16px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:flex-end;">
+      <div style="flex:1;">
+        <textarea id="chat-input" rows="1" placeholder="Спросите что-нибудь…" style="height:44px;resize:none;"></textarea>
+        <div id="chat-file-name" class="muted" style="font-size:12px;margin-top:4px;display:none;"></div>
+      </div>
+      <label class="secondary" style="height:44px;width:44px;border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;">
+        📎<input id="chat-file" type="file" accept="image/*,.txt,.md,.csv,.json,.log" style="display:none;">
+      </label>
+      <button type="submit" id="chat-send" style="flex-shrink:0;">Отправить</button>
+    </form>
+  </div>
+</div>
+</div>
+
+<script>
+(function(){
+  var conversationId = {{ active_conversation.id if active_conversation else "null" }};
+  var log = document.getElementById('chat-log');
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var fileInput = document.getElementById('chat-file');
+  var fileNameLabel = document.getElementById('chat-file-name');
+  var sendBtn = document.getElementById('chat-send');
+  var modelSelect = document.getElementById('chat-model');
+
+  fileInput.addEventListener('change', function(){
+    if (fileInput.files.length) {
+      fileNameLabel.textContent = '📎 ' + fileInput.files[0].name;
+      fileNameLabel.style.display = 'block';
+    } else {
+      fileNameLabel.style.display = 'none';
+    }
+  });
+
+  function addBubble(role, text, attachmentName){
+    var wrap = document.createElement('div');
+    wrap.style.maxWidth = '78%';
+    wrap.style.alignSelf = role === 'user' ? 'flex-end' : 'flex-start';
+    var bubble = document.createElement('div');
+    bubble.style.background = role === 'user' ? 'var(--accent)' : 'var(--surface-hi)';
+    bubble.style.color = role === 'user' ? 'var(--btn-on-accent)' : 'var(--text)';
+    bubble.style.borderRadius = '12px';
+    bubble.style.padding = '10px 14px';
+    bubble.style.fontSize = '14.5px';
+    bubble.style.lineHeight = '1.5';
+    bubble.style.whiteSpace = 'pre-wrap';
+    bubble.textContent = text;
+    wrap.appendChild(bubble);
+    if (attachmentName) {
+      var att = document.createElement('div');
+      att.className = 'muted';
+      att.style.fontSize = '11.5px';
+      att.style.marginTop = '4px';
+      att.textContent = '📎 ' + attachmentName;
+      wrap.appendChild(att);
+    }
+    log.appendChild(wrap);
+    log.scrollTop = log.scrollHeight;
+    return wrap;
+  }
+
+  form.addEventListener('submit', function(e){
+    e.preventDefault();
+    var text = input.value.trim();
+    var file = fileInput.files[0] || null;
+    if (!text && !file) return;
+
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Думаю…';
+    addBubble('user', text || '(файл без текста)', file ? file.name : null);
+    input.value = '';
+    fileInput.value = '';
+    fileNameLabel.style.display = 'none';
+
+    var fd = new FormData();
+    if (conversationId) fd.append('conversation_id', conversationId);
+    fd.append('model', modelSelect.value);
+    fd.append('message', text);
+    if (file) fd.append('file', file);
+
+    fetch('/chat/send', {method: 'POST', body: fd})
+      .then(function(r){
+        if (!r.ok) return r.json().then(function(body){ throw new Error((body.detail || 'Ошибка') + ''); });
+        return r.json();
+      })
+      .then(function(data){
+        if (!conversationId) {
+          window.location.href = '/chat/' + data.conversation_id;
+          return;
+        }
+        addBubble('assistant', data.reply, null);
+      })
+      .catch(function(err){
+        addBubble('assistant', 'Не получилось: ' + err.message, null);
+      })
+      .finally(function(){
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Отправить';
+      });
+  });
+
+  input.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+})();
+</script>
+{% endblock %}

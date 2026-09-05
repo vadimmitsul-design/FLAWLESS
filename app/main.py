@@ -5,12 +5,15 @@ import logging
 import re
 import secrets
 import time
+import contextlib
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 
+import base64
+
 import litellm
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -35,6 +38,8 @@ from app.models import (
     TopupRequest,
     UsageEvent,
     WalletLedger,
+    WebConversation,
+    WebMessage,
     utcnow,
 )
 from app.schemas import ChatCompletionRequest
@@ -69,9 +74,20 @@ async def lifespan(app: FastAPI):
     reaper_task = asyncio.create_task(reaper.reaper_loop())
     logger.info("stale-pending-event reaper task started")
     yield
+    # cancel() без await — задача помечена отменённой, но её собственный
+    # SessionLocal()/aiosqlite-хендл может не успеть закрыться до того, как
+    # процесс/цикл событий уйдёт дальше (в тестах — до следующего TestClient).
+    # На много итераций (полный прогон тестов — под сотню TestClient) это
+    # накапливалось в утечку хендлов/потоков anyio-портала и давало
+    # неустойчивые зависания в никак не связанных тестах. Дожидаемся отмены
+    # явно.
     if telegram_task is not None:
         telegram_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await telegram_task
     reaper_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reaper_task
 
 
 app = FastAPI(title="Flawless", lifespan=lifespan)
@@ -1376,3 +1392,261 @@ async def _stream_chat_completion(
             # GeneratorExit) — yield здесь запрещён (генератор закрывается),
             # только фиксируем биллинг, чтобы резерв не завис навсегда.
             await _charge_partial_and_close("ClientDisconnected")
+
+
+# ---------- веб: чат в кабинете (2.3 доработок) ----------
+# Третья дверь входа рядом с API-ключом и Telegram — для клиентов, которые
+# никогда не видели API-ключа. Тот же путь биллинга, что и /v1/chat/completions
+# (billing.estimate_reserve_rub/start_call/finalize_*) — никакой отдельной
+# логики списания, только другая обвязка вокруг тех же функций.
+
+_CHAT_ALLOWED_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log"}
+_CHAT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # с запасом под фото; не под видео/архивы
+
+# Парсинг PDF/офисных документов НЕ реализован (нужна доп. библиотека,
+# scope не указывал конкретные форматы) — только картинки (vision) и простой
+# текст. См. CLAUDE.md.
+
+
+def _chat_message_display_text(content: str) -> str:
+    """content может быть JSON-списком частей (текст+картинка, OpenAI-формат) —
+    для истории в интерфейсе достаточно текстовой части."""
+    if not content.startswith("["):
+        return content
+    try:
+        parts = json.loads(content)
+    except (ValueError, TypeError):
+        return content
+    texts = [p.get("text", "") for p in parts if isinstance(p, dict) and p.get("type") == "text"]
+    return "\n".join(t for t in texts if t) or "[вложение]"
+
+
+def _chat_message_provider_content(content: str):
+    if content.startswith("["):
+        try:
+            return json.loads(content)
+        except (ValueError, TypeError):
+            return content
+    return content
+
+
+@app.get("/chat")
+async def web_chat(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    conversations = (
+        await session.execute(
+            select(WebConversation)
+            .where(WebConversation.customer_id == customer.id)
+            .order_by(WebConversation.updated_at.desc())
+        )
+    ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "chat.html",
+        {
+            "customer": customer,
+            "conversations": conversations,
+            "active_conversation": None,
+            "chat_messages": [],
+            "models": llm.known_models(),
+        },
+    )
+
+
+@app.get("/chat/{conversation_id}")
+async def web_chat_conversation(
+    conversation_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    conversation = await session.get(WebConversation, conversation_id)
+    if conversation is None or conversation.customer_id != customer.id:
+        raise HTTPException(status_code=404)
+    conversations = (
+        await session.execute(
+            select(WebConversation)
+            .where(WebConversation.customer_id == customer.id)
+            .order_by(WebConversation.updated_at.desc())
+        )
+    ).scalars().all()
+    raw_messages = (
+        await session.execute(
+            select(WebMessage)
+            .where(WebMessage.conversation_id == conversation.id)
+            .order_by(WebMessage.created_at)
+        )
+    ).scalars().all()
+    chat_messages = [
+        {"role": m.role, "text": _chat_message_display_text(m.content), "attachment_name": m.attachment_name}
+        for m in raw_messages
+    ]
+    return templates.TemplateResponse(
+        request,
+        "chat.html",
+        {
+            "customer": customer,
+            "conversations": conversations,
+            "active_conversation": conversation,
+            "chat_messages": chat_messages,
+            "models": llm.known_models(),
+        },
+    )
+
+
+@app.post("/chat/send")
+async def web_chat_send(
+    conversation_id: int | None = Form(None),
+    model: str = Form(...),
+    message: str = Form(""),
+    file: UploadFile | None = File(None),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    if customer is None:
+        raise HTTPException(status_code=401)
+
+    try:
+        provider, model_name = llm.resolve_alias(model)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown model '{model}'")
+
+    conversation = None
+    if conversation_id is not None:
+        conversation = await session.get(WebConversation, conversation_id)
+        if conversation is None or conversation.customer_id != customer.id:
+            raise HTTPException(status_code=404)
+
+    if not message.strip() and file is None:
+        raise HTTPException(status_code=400, detail="empty message")
+
+    attachment_name = None
+    content_parts = None  # None -> просто текст; иначе список частей (текст+картинка)
+    extra_text = ""
+    if file is not None and file.filename:
+        data = await file.read()
+        if len(data) > _CHAT_MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=400, detail="file too large (5MB max)")
+        attachment_name = file.filename
+        content_type = file.content_type or ""
+        ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if content_type.startswith("image/"):
+            b64 = base64.b64encode(data).decode("ascii")
+            content_parts = [
+                {"type": "text", "text": message.strip() or "Что на этом изображении?"},
+                {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{b64}"}},
+            ]
+        elif ext in _CHAT_ALLOWED_TEXT_EXTENSIONS:
+            try:
+                extra_text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise HTTPException(status_code=400, detail="text file must be UTF-8")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="unsupported file type — only images and text files (.txt/.md/.csv/.json/.log)",
+            )
+
+    if content_parts is not None:
+        stored_content = json.dumps(content_parts)
+    else:
+        user_text = message.strip()
+        if extra_text:
+            user_text = f"{user_text}\n\nПрикреплённый файл {attachment_name}:\n{extra_text}".strip()
+        stored_content = user_text
+
+    if conversation is None:
+        title = (message.strip() or attachment_name or "Новый диалог")[:60]
+        conversation = WebConversation(customer_id=customer.id, model_alias=model, title=title)
+        session.add(conversation)
+        await session.flush()
+    conversation.model_alias = model
+    conversation.updated_at = utcnow()
+
+    history = (
+        await session.execute(
+            select(WebMessage)
+            .where(WebMessage.conversation_id == conversation.id)
+            .order_by(WebMessage.created_at)
+        )
+    ).scalars().all()
+    provider_messages = [
+        {"role": m.role, "content": _chat_message_provider_content(m.content)} for m in history
+    ]
+    provider_messages.append(
+        {"role": "user", "content": content_parts if content_parts is not None else stored_content}
+    )
+
+    try:
+        prepared_messages, dlp_found = _prepare_messages(customer, provider_messages, None)
+    except ChildRequestBlocked:
+        raise HTTPException(
+            status_code=400,
+            detail="Недоступно в детском режиме — попроси объяснить тему, а не готовое сочинение/реферат.",
+        )
+
+    session.add(
+        WebMessage(
+            conversation_id=conversation.id, role="user", content=stored_content, attachment_name=attachment_name
+        )
+    )
+    await session.flush()
+
+    billing_customer_id = billing.resolve_billing_customer_id(customer)
+    pricing_cfg = await billing.get_pricing_config(session)
+    reserve_price = await pricing.find_price(session, provider, model_name, None, None, utcnow())
+    reserve_rub = billing.estimate_reserve_rub(reserve_price, prepared_messages, {}, pricing_cfg)
+
+    try:
+        event = await billing.start_call(
+            session, customer.id, billing_customer_id, provider, model_name, estimated_reserve_rub=reserve_rub
+        )
+    except billing.InsufficientBalance as e:
+        raise HTTPException(
+            status_code=402,
+            detail=f"insufficient balance — нужно ~{e.required} ₽, доступно {e.balance} ₽",
+        )
+    if dlp_found:
+        event.dlp_redactions = ",".join(sorted(set(dlp_found)))
+
+    started = time.monotonic()
+    try:
+        _, resp_provider, resp_model, response = await llm.chat_completion_with_fallback(model, prepared_messages)
+    except Exception as e:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        await billing.finalize_failure(session, event, error_code=type(e).__name__, latency_ms=latency_ms)
+        logger.warning("web chat call failed for event %s (incl. fallback chain): %r", event.id, e)
+        raise HTTPException(status_code=502, detail="провайдер сейчас недоступен, попробуйте ещё раз")
+
+    event.provider = resp_provider
+    event.model = resp_model
+    latency_ms = int((time.monotonic() - started) * 1000)
+    usage = llm.extract_chat_usage(response)
+    price = await pricing.find_price(session, resp_provider, resp_model, None, None, event.created_at)
+    cost_usd = pricing.compute_cost(price, usage)
+    reply_text = llm.to_dict(response)["choices"][0]["message"]["content"]
+    await billing.finalize_success(
+        session,
+        event,
+        usage=usage,
+        cost_usd=cost_usd,
+        price_id=price.id if price else None,
+        litellm_cost=llm.extract_litellm_cost(response),
+        pricing_cfg=pricing_cfg,
+        latency_ms=latency_ms,
+        provider_request_id=llm.extract_call_id(response),
+    )
+
+    session.add(WebMessage(conversation_id=conversation.id, role="assistant", content=reply_text, usage_event_id=event.id))
+    await session.commit()
+
+    return JSONResponse(
+        {"conversation_id": conversation.id, "conversation_title": conversation.title, "reply": reply_text}
+    )

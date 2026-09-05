@@ -375,3 +375,41 @@ class TelegramLink(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class WebConversation(Base):
+    """Диалог в веб-чате кабинета (2.3 доработок) — третья дверь входа
+    рядом с API-ключом и Telegram, тот же путь биллинга (billing.start_call/
+    finalize_*), никакой отдельной логики списания."""
+
+    __tablename__ = "web_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    model_alias: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=utcnow
+    )
+
+
+class WebMessage(Base):
+    """Одна реплика внутри WebConversation. content — то, что реально
+    ушло/пришло в диалоге (для сообщений с картинкой — JSON-список частей
+    OpenAI-формата, иначе обычный текст) — нужен для восстановления полной
+    истории при каждом следующем вызове провайдера."""
+
+    __tablename__ = "web_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("web_conversations.id"), index=True)
+    role: Mapped[str] = mapped_column(Text)
+    content: Mapped[str] = mapped_column(Text)
+    attachment_name: Mapped[str | None] = mapped_column(Text)
+    usage_event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("usage_events.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
