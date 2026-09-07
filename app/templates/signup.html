@@ -11,8 +11,12 @@
       <h1 style="font-size:22px;text-align:center;margin-bottom:26px;">Создать аккаунт</h1>
       {% if error %}<p style="color:var(--bad);font-size:14px;margin-top:0;">{{ error }}</p>{% endif %}
       <form method="post" action="/signup">
+        {% if invite_required %}
+        <label for="invite">Код приглашения</label>
+        <input id="invite" name="invite" required autofocus placeholder="выдаёт администратор">
+        {% endif %}
         <label for="name">Имя / компания</label>
-        <input id="name" name="name" required autofocus>
+        <input id="name" name="name" required {% if not invite_required %}autofocus{% endif %}>
         <label for="email">Email</label>
         <input id="email" name="email" type="email" required>
         <label for="password">Пароль</label>

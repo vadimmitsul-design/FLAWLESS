@@ -377,6 +377,24 @@ class TelegramLink(Base):
     )
 
 
+class InviteCode(Base):
+    """Одноразовый код приглашения на регистрацию (закрытый контур,
+    settings.signup_mode='invite'). Строка НЕ удаляется после использования —
+    нужна история, кто кого позвал и когда."""
+
+    __tablename__ = "invite_codes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_by_admin_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
+    used_by_customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class WebConversation(Base):
     """Диалог в веб-чате кабинета (2.3 доработок) — третья дверь входа
     рядом с API-ключом и Telegram, тот же путь биллинга (billing.start_call/

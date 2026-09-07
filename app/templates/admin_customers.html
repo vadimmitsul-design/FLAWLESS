@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Люди — Flawless{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:22px;margin-bottom:8px;">Люди</h1>
+<p class="muted" style="margin-top:0;">Отключение действует немедленно — и на вход в кабинет, и на все API-ключи этого человека. Включить обратно можно тут же.</p>
+<div class="card" style="margin-bottom:0;">
+{% if not rows %}
+<p class="muted">Пока никого нет.</p>
+{% else %}
+<table>
+<thead><tr><th>Имя</th><th>Роль</th><th>Баланс</th><th>Регистрация</th><th>Статус</th><th>Действие</th></tr></thead>
+<tbody>
+{% for c in rows %}
+<tr{% if not c.active %} style="opacity:.55;"{% endif %}>
+  <td>{{ c.name }}<div class="muted" style="margin:0;">{{ c.email }}</div></td>
+  <td>
+    {% if c.role == 'admin' %}<span class="badge badge-role mono">admin</span>
+    {% elif c.is_child %}<span class="badge badge-warn">ребёнок</span>
+    {% else %}<span class="muted">клиент</span>{% endif %}
+  </td>
+  <td class="mono">{{ "%.4f"|format(c.balance_rub) }} ₽</td>
+  <td style="color:var(--text-faint);">{{ c.created_at.strftime("%d.%m.%Y") }}</td>
+  <td>
+    {% if c.active %}<span class="badge badge-ok">активен</span>
+    {% else %}<span class="badge badge-bad">отключён</span>{% endif %}
+  </td>
+  <td>
+    {% if c.id != customer.id %}
+    <form class="inline" method="post" action="/admin/customers/{{ c.id }}/toggle-active">
+      <button type="submit" class="secondary" style="height:34px;padding:0 12px;font-size:13px;">
+        {{ "Отключить" if c.active else "Включить" }}
+      </button>
+    </form>
+    {% else %}
+    <span class="muted">это вы</span>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+</div>
+{% endblock %}

@@ -17,14 +17,14 @@ import litellm
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import billing, dlp, llm, pricing, ratelimit, reaper, telegram_bot
 from app.csrf import CSRFOriginMiddleware
-from app.config import settings
+from app.config import session_secret_is_weak, settings
 from app.db import get_session
 from app.models import (
     ApiKey,
@@ -32,6 +32,7 @@ from app.models import (
     DialogueArchive,
     PasswordResetRequest,
     Product,
+    InviteCode,
     Prompt,
     SubscriptionOrder,
     TelegramLink,
@@ -60,13 +61,29 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+_SIGNUP_MODES = {"invite", "open", "closed"}
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if settings.environment == "production" and settings.session_secret == "change-me":
-        # Дефолтный секрет в проде = любая сессия подделывается — падаем на
-        # старте, а не тихо работаем с дырявыми куками.
-        raise RuntimeError("SESSION_SECRET must be set to a real value when ENVIRONMENT=production")
+    if session_secret_is_weak(settings.session_secret):
+        # Слабый секрет = любая сессия подделывается (кука подписана, но не
+        # зашифрована). В проде падаем на старте, в разработке громко ругаемся:
+        # молча работать с дырявыми куками нельзя ни в одном режиме.
+        # Раньше проверка сравнивала только с "change-me", а в .env.example
+        # лежало "change-me-session-secret" — и не срабатывала никогда.
+        if settings.environment == "production":
+            raise RuntimeError(
+                "SESSION_SECRET is default/weak — sessions would be forgeable. "
+                "Set a random value of at least 32 characters (python -c \"import secrets; "
+                "print(secrets.token_urlsafe(48))\") before running with ENVIRONMENT=production"
+            )
+        logger.warning(
+            "SESSION_SECRET is default/weak — session cookies are forgeable. "
+            "Acceptable locally, MUST be replaced before deploying."
+        )
+    if settings.signup_mode not in _SIGNUP_MODES:
+        raise RuntimeError(f"SIGNUP_MODE must be one of {sorted(_SIGNUP_MODES)}, got '{settings.signup_mode}'")
     llm.init_router()
     telegram_task = None
     if settings.telegram_bot_token:
@@ -119,7 +136,11 @@ async def healthz():
 
 @app.get("/signup")
 async def signup_form(request: Request):
-    return templates.TemplateResponse(request, "signup.html", {"error": None})
+    if settings.signup_mode == "closed":
+        return templates.TemplateResponse(request, "signup_closed.html", {}, status_code=403)
+    return templates.TemplateResponse(
+        request, "signup.html", {"error": None, "invite_required": settings.signup_mode == "invite"}
+    )
 
 
 @app.post("/signup")
@@ -128,18 +149,58 @@ async def signup_submit(
     email: str = Form(...),
     name: str = Form(...),
     password: str = Form(...),
+    invite: str = Form(""),
     session: AsyncSession = Depends(get_session),
 ):
+    if settings.signup_mode == "closed":
+        return templates.TemplateResponse(request, "signup_closed.html", {}, status_code=403)
+    invite_required = settings.signup_mode == "invite"
+
+    def _fail(message: str, status_code: int):
+        return templates.TemplateResponse(
+            request,
+            "signup.html",
+            {"error": message, "invite_required": invite_required},
+            status_code=status_code,
+        )
+
+    invite_code = None
+    if invite_required:
+        code = invite.strip()
+        if not code:
+            return _fail("Нужен код приглашения — запросите его у администратора", 400)
+        invite_code = (
+            await session.execute(
+                select(InviteCode).where(InviteCode.code == code, InviteCode.used_by_customer_id.is_(None))
+            )
+        ).scalar_one_or_none()
+        if invite_code is None:
+            return _fail("Код приглашения не найден или уже использован", 400)
+
     email = email.strip().lower()
     exists = (
         await session.execute(select(Customer).where(Customer.email == email))
     ).scalar_one_or_none()
     if exists is not None:
-        return templates.TemplateResponse(
-            request, "signup.html", {"error": "Этот email уже зарегистрирован"}, status_code=409
-        )
+        return _fail("Этот email уже зарегистрирован", 409)
+
     customer = Customer(email=email, name=name.strip(), password_hash=hash_password(password))
     session.add(customer)
+    await session.flush()
+
+    if invite_code is not None:
+        # Гасим код атомарно: между SELECT выше и этим UPDATE тем же кодом мог
+        # успеть зарегистрироваться кто-то ещё. rowcount==0 значит проиграли
+        # гонку — не коммитим (сессия закроется и откатит вставку клиента),
+        # rollback() руками не зовём: он экспайрит объекты сессии, см. billing.py.
+        used = await session.execute(
+            update(InviteCode)
+            .where(InviteCode.id == invite_code.id, InviteCode.used_by_customer_id.is_(None))
+            .values(used_by_customer_id=customer.id, used_at=utcnow())
+        )
+        if used.rowcount == 0:
+            return _fail("Код приглашения только что использовали — запросите новый", 409)
+
     await session.commit()
     request.session["customer_id"] = customer.id
     return RedirectResponse("/", status_code=303)
@@ -1036,6 +1097,96 @@ async def admin_refund_order(
         raise HTTPException(status_code=404)
     await billing.refund_order(session, order, admin_id=customer.id)
     return RedirectResponse("/admin/orders", status_code=303)
+
+
+# ---------- веб: админ — люди и приглашения ----------
+
+
+@app.get("/admin/customers")
+async def admin_customers(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    rows = (
+        await session.execute(
+            select(Customer).order_by(Customer.active.desc(), Customer.created_at.desc())
+        )
+    ).scalars().all()
+    return templates.TemplateResponse(
+        request, "admin_customers.html", {"customer": customer, "rows": rows}
+    )
+
+
+@app.post("/admin/customers/{customer_id}/toggle-active")
+async def admin_toggle_customer_active(
+    customer_id: int,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Отключение аккаунта. Действует немедленно и на сессию, и на API-ключи:
+    обе зависимости аутентификации перечитывают Customer.active на каждом
+    запросе (см. security.py). Раньше поле читалось, но не выставлялось нигде —
+    отключить человека можно было только SQL-запросом руками."""
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    target = await session.get(Customer, customer_id)
+    if target is None:
+        raise HTTPException(status_code=404)
+    if target.id == customer.id:
+        # Иначе админ отключает сам себя и теряет доступ в админку — вернуть
+        # его сможет только SQL, то есть ровно та проблема, что мы чиним.
+        raise HTTPException(status_code=400, detail="cannot disable your own account")
+    target.active = not target.active
+    await session.commit()
+    return RedirectResponse("/admin/customers", status_code=303)
+
+
+@app.get("/admin/invites")
+async def admin_invites(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    rows = (
+        await session.execute(
+            select(InviteCode, Customer)
+            .outerjoin(Customer, Customer.id == InviteCode.used_by_customer_id)
+            .order_by(InviteCode.used_at.is_not(None), InviteCode.created_at.desc())
+        )
+    ).all()
+    return templates.TemplateResponse(
+        request,
+        "admin_invites.html",
+        {"customer": customer, "rows": rows, "signup_mode": settings.signup_mode},
+    )
+
+
+@app.post("/admin/invites/new")
+async def admin_create_invite(
+    note: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    session.add(
+        InviteCode(
+            code=secrets.token_urlsafe(8),
+            note=note.strip() or None,
+            created_by_admin_id=customer.id,
+        )
+    )
+    await session.commit()
+    return RedirectResponse("/admin/invites", status_code=303)
 
 
 # ---------- веб: админ — API-ключи (2.2 доработок) ----------

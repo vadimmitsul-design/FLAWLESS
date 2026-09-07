@@ -26,6 +26,10 @@ os.environ["SESSION_SECRET"] = "test-secret"
 # lifespan() при каждом `with TestClient(app)`. Фиктивный, но непустой токен
 # нужен, чтобы /telegram/link не отдавал 404 (роут требует settings.telegram_bot_token).
 os.environ["TELEGRAM_BOT_TOKEN"] = "test:dummy-token"
+# Дефолт в проде — invite (закрытый контур). Тесты регистрируют клиентов
+# десятками, поэтому здесь открытый режим; закрытый режим проверяется
+# отдельно в test_signup_gating.py через подмену settings.signup_mode.
+os.environ["SIGNUP_MODE"] = "open"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 

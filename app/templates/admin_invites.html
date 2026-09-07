@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Приглашения — Flawless{% endblock %}
+{% block content %}
+<div class="wrap" style="padding:40px 32px 80px;">
+<h1 style="font-size:22px;margin-bottom:8px;">Приглашения</h1>
+{% if signup_mode == 'invite' %}
+<p class="muted" style="margin-top:0;">Регистрация закрыта: завести аккаунт можно только по одноразовому коду. Код гасится в момент использования.</p>
+{% elif signup_mode == 'open' %}
+<p class="muted" style="margin-top:0;color:var(--warn);">Внимание: сейчас <b>SIGNUP_MODE=open</b> — регистрация открыта всем, коды не требуются. Для закрытого контура переключите на <code>invite</code>.</p>
+{% else %}
+<p class="muted" style="margin-top:0;">Сейчас <b>SIGNUP_MODE=closed</b> — регистрация выключена совсем, коды не сработают.</p>
+{% endif %}
+
+<div class="card">
+  <form method="post" action="/admin/invites/new" style="display:flex;gap:10px;align-items:end;">
+    <div style="flex:1;">
+      <label for="note">Для кого (по желанию)</label>
+      <input id="note" name="note" placeholder="например, Пётр, бэкенд">
+    </div>
+    <button type="submit" style="height:44px;">Создать код</button>
+  </form>
+</div>
+
+<div class="card" style="margin-bottom:0;">
+{% if not rows %}
+<p class="muted">Кодов ещё нет.</p>
+{% else %}
+<table>
+<thead><tr><th>Код</th><th>Для кого</th><th>Создан</th><th>Статус</th></tr></thead>
+<tbody>
+{% for inv, used_by in rows %}
+<tr{% if inv.used_at %} style="opacity:.55;"{% endif %}>
+  <td class="mono">{{ inv.code }}</td>
+  <td>{{ inv.note or "—" }}</td>
+  <td style="color:var(--text-faint);">{{ inv.created_at.strftime("%d.%m.%Y") }}</td>
+  <td>
+    {% if used_by %}
+      <span class="badge badge-bad">использован</span>
+      <div class="muted" style="margin:2px 0 0;">{{ used_by.name }} · {{ used_by.email }}</div>
+    {% else %}
+      <span class="badge badge-ok">свободен</span>
+    {% endif %}
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+</div>
+</div>
+{% endblock %}

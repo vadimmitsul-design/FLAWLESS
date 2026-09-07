@@ -1,11 +1,37 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Значения session_secret, которые нельзя пускать в прод: дефолт из кода,
+# плейсхолдер из .env.example и типичные заглушки. Раньше проверка в main.py
+# сравнивала только со строкой "change-me", а в .env.example лежит
+# "change-me-session-secret" — другая строка, и защита не срабатывала никогда.
+_INSECURE_SESSION_SECRETS = {
+    "change-me",
+    "change-me-session-secret",
+    "changeme",
+    "secret",
+    "session-secret",
+    "test-secret",
+}
+_MIN_SESSION_SECRET_LEN = 32
+
+
+def session_secret_is_weak(secret: str) -> bool:
+    """Кука сессии подписывается этим значением (не шифруется). Угадал строку —
+    подписал себе куку любого клиента, включая админа."""
+    normalized = secret.strip()
+    return normalized.lower() in _INSECURE_SESSION_SECRETS or len(normalized) < _MIN_SESSION_SECRET_LEN
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://neurohub:neurohub@localhost:5434/neurohub"
     session_secret: str = "change-me"
+    # Кто может завести аккаунт:
+    #   invite — только по одноразовому коду от админа (дефолт: закрытый контур)
+    #   open   — любой желающий (публичный реселлинг, второй этап)
+    #   closed — регистрация выключена совсем, аккаунты заводит админ
+    signup_mode: str = "invite"
     # "production" включает Secure-флаг на сессионной куке (main.py) и
     # запрещает дефолтный session_secret при старте. Локально/в docker compose
     # без TLS оставлять "development" — иначе кука не будет отправляться по HTTP.
