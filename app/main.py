@@ -529,6 +529,13 @@ async def create_prompt(
 ):
     if customer is None:
         return RedirectResponse("/login", status_code=303)
+    if customer.is_child:
+        # Детский аккаунт — ограниченный субаккаунт, тратящий чужой кошелёк.
+        # Продавцом на маркетплейсе он быть не должен: именно через связку
+        # «ребёнок публикует платный промпт и сам его вызывает» выкачивался
+        # кошелёк родителя (аудит 2026-09-07). Основную защиту делает
+        # billing.charge_prompt_fee, это второй рубеж.
+        raise HTTPException(status_code=403, detail="детский аккаунт не может публиковать промпты")
     if price_rub <= 0:
         # Без этой проверки цена промпта уходит прямо в billing.charge_prompt_fee
         # как есть: отрицательная цена = payer.balance_rub -= price_rub увеличивает

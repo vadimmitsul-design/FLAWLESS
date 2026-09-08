@@ -10,6 +10,7 @@
 append-only, как везде в этом кодовом кусте.
 """
 
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -32,6 +33,8 @@ from app.models import (
 )
 from app import pricing as pricing_module
 from app.pricing import UsageAmounts, estimate_call_cost_usd
+
+logger = logging.getLogger(__name__)
 
 _RUB_QUANT = Decimal("0.0001")
 
@@ -88,6 +91,27 @@ def _effective_limit(client_limit: Decimal | None, admin_limit: Decimal | None) 
     if admin_limit is None:
         return client_limit
     return min(client_limit, admin_limit)
+
+
+async def available_balance(
+    session: AsyncSession, billing_customer_id: int, balance_rub: Decimal
+) -> Decimal:
+    """Баланс за вычетом сумм, зарезервированных под ЕЩЁ выполняющиеся вызовы.
+
+    Единственный расчёт «сколько реально можно потратить прямо сейчас» — им
+    обязаны пользоваться ВСЕ списания. Пока эта логика жила только внутри
+    start_call, покупка в магазине смотрела на голый balance_rub и не видела
+    резервов: во время долгого запроса к модели можно было купить подписку
+    почти на весь баланс, обе операции проходили, итог — минус."""
+    reserved = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.reserved_rub), 0)).where(
+                UsageEvent.billing_customer_id == billing_customer_id,
+                UsageEvent.status == "pending",
+            )
+        )
+    ).scalar_one()
+    return balance_rub - reserved
 
 
 async def price_for_call(
@@ -252,15 +276,7 @@ async def start_call(
     что и с InsufficientBalance выше). Предварительный find_event_by_idempotency_key
     не закрывает эту гонку (TOCTOU), только страхует типичный случай."""
     payer = await session.get(Customer, billing_customer_id, with_for_update=True)
-    active_reserved = (
-        await session.execute(
-            select(func.coalesce(func.sum(UsageEvent.reserved_rub), 0)).where(
-                UsageEvent.billing_customer_id == billing_customer_id,
-                UsageEvent.status == "pending",
-            )
-        )
-    ).scalar_one()
-    available = payer.balance_rub - active_reserved
+    available = await available_balance(session, billing_customer_id, payer.balance_rub)
     if payer.balance_rub <= 0 or available < estimated_reserve_rub:
         # Намеренно НЕ делаем rollback здесь: он экспайрит вообще все объекты
         # в сессии (включая customer из Depends(get_current_customer) и любые
@@ -485,11 +501,15 @@ async def purchase_subscription(
     price_rub = product.price_rub
     product_id = product.id
     customer = await session.get(Customer, customer_id, with_for_update=True)
-    if customer.balance_rub < price_rub:
+    # По ДОСТУПНОМУ балансу, а не по голому balance_rub: иначе покупка не
+    # видит денег, уже зарезервированных под выполняющиеся вызовы, и те же
+    # рубли тратятся дважды.
+    available = await available_balance(session, customer_id, customer.balance_rub)
+    if available < price_rub:
         # См. комментарий в start_call — намеренно без rollback, чтобы не
         # инвалидировать другие объекты уже загруженные в этой сессии
         # (например customer из auth-зависимости в самом роуте).
-        raise InsufficientBalance(customer.balance_rub, required=price_rub)
+        raise InsufficientBalance(available, required=price_rub)
 
     order = SubscriptionOrder(
         customer_id=customer_id,
@@ -548,9 +568,30 @@ async def charge_prompt_fee(
     session: AsyncSession, billing_customer_id: int, prompt: Prompt, usage_event_id
 ) -> None:
     """Списывает фикс. цену промпта сверх обычной токенной стоимости вызова
-    (см. finalize_success) и начисляет автору роялти. Списывается по факту,
-    как и токенная стоимость — не блокирует вызов заранее."""
+    (см. finalize_success) и начисляет автору роялти.
+
+    Два правила, без которых это работало как насос для чужого кошелька:
+
+    1. ВНУТРИ ОДНОГО КОШЕЛЬКА промпт бесплатен — ни платы, ни роялти.
+       Старая проверка сравнивала author.id с payer.id и пропускала связку
+       «ребёнок-автор, платит родитель»: ребёнок публиковал промпт за 100 ₽,
+       вызывал его своим ключом, родитель терял 100 ₽, ребёнку приходило 50 ₽.
+       В цикле кошелёк родителя вычерпывался (воспроизведено на живом
+       приложении в аудите 2026-09-07). Сравниваем теперь КОШЕЛЬКИ, а не
+       аккаунты, и в этом случае не берём даже саму плату — платить самому
+       себе за свой же промпт смысла нет.
+
+    2. РОЯЛТИ ВЫПЛАЧИВАЕТСЯ ТОЛЬКО ИЗ СОБРАННЫХ ДЕНЕГ. Если после списания
+       платы баланс плательщика уходит в минус, значит денег на неё не было —
+       и раздавать автору половину того, чего мы не получили, нельзя. Плату
+       всё равно фиксируем (услуга оказана, долг виден в журнале), роялти —
+       нет, с записью в лог.
+    """
     payer = await session.get(Customer, billing_customer_id, with_for_update=True)
+    author = await session.get(Customer, prompt.author_customer_id)
+    if author is not None and resolve_billing_customer_id(author) == billing_customer_id:
+        return
+
     session.add(
         WalletLedger(
             customer_id=payer.id,
@@ -562,7 +603,7 @@ async def charge_prompt_fee(
     )
     payer.balance_rub -= prompt.price_rub
 
-    if prompt.author_customer_id != payer.id:
+    if author is not None and payer.balance_rub >= 0:
         royalty = (prompt.price_rub * _ROYALTY_SHARE).quantize(_RUB_QUANT)
         author = await session.get(Customer, prompt.author_customer_id, with_for_update=True)
         session.add(
@@ -575,4 +616,11 @@ async def charge_prompt_fee(
             )
         )
         author.balance_rub += royalty
+    elif author is not None:
+        logger.warning(
+            "prompt #%s: роялти не начислено — плата увела баланс плательщика %s в минус (%s ₽)",
+            prompt.id,
+            payer.id,
+            payer.balance_rub,
+        )
     await session.commit()
