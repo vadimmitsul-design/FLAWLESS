@@ -5,6 +5,8 @@
 .env
 .env.*
 !.env.example
+# ...кроме шаблонов без секретов: .env.internal.example, .env.public.example
+!.env.*.example
 *.db
 # Дампы базы (scripts/backup_db.sh) — там балансы и вся история клиентов
 backups/
