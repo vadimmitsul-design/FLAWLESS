@@ -1,20 +1,21 @@
 import asyncio
+import base64
+import contextlib
+import csv
 import hashlib
+import io
 import json
 import logging
 import re
 import secrets
 import time
-import contextlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
-import base64
-
 import litellm
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, update
@@ -1099,7 +1100,53 @@ async def admin_refund_order(
     return RedirectResponse("/admin/orders", status_code=303)
 
 
-# ---------- веб: админ — люди и приглашения ----------
+# ---------- веб: админ — люди, потребление, приглашения ----------
+
+
+def _parse_month(value: str | None) -> tuple[datetime, datetime, str]:
+    """'YYYY-MM' -> границы месяца в UTC. По умолчанию — текущий месяц.
+    Границы считаем явными сравнениями created_at, а не приведением к дате
+    в SQL: приведение timestamptz к date в Postgres зависит от таймзоны
+    сессии, и отчёт молча съезжал бы на границах суток."""
+    now = datetime.now(timezone.utc)
+    if value:
+        try:
+            parsed = datetime.strptime(value, "%Y-%m")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+        year, month = parsed.year, parsed.month
+    else:
+        year, month = now.year, now.month
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    end = datetime(year + (month == 12), 1 if month == 12 else month + 1, 1, tzinfo=timezone.utc)
+    return start, end, f"{year:04d}-{month:02d}"
+
+
+def _shift_month(label: str, delta: int) -> str:
+    year, month = (int(part) for part in label.split("-"))
+    index = year * 12 + (month - 1) + delta
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
+async def _spend_by_customer(session: AsyncSession, start: datetime, end: datetime) -> dict:
+    """Расход за период по КОШЕЛЬКАМ (billing_customer_id): для детского
+    аккаунта платит родитель, и бюджет расходуется у него."""
+    rows = (
+        await session.execute(
+            select(
+                UsageEvent.billing_customer_id,
+                func.count(UsageEvent.id),
+                func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+            )
+            .where(
+                UsageEvent.charged_rub.is_not(None),
+                UsageEvent.created_at >= start,
+                UsageEvent.created_at < end,
+            )
+            .group_by(UsageEvent.billing_customer_id)
+        )
+    ).all()
+    return {payer_id: {"calls": calls, "spent": spent} for payer_id, calls, spent in rows}
 
 
 @app.get("/admin/customers")
@@ -1107,17 +1154,83 @@ async def admin_customers(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
     session: AsyncSession = Depends(get_session),
+    month: str | None = None,
 ):
     redirect = _require_admin(customer)
     if redirect is not None:
         return redirect
-    rows = (
+    start, end, label = _parse_month(month)
+    spend = await _spend_by_customer(session, start, end)
+    customers = (
         await session.execute(
             select(Customer).order_by(Customer.active.desc(), Customer.created_at.desc())
         )
     ).scalars().all()
+    rows = [
+        {
+            "c": c,
+            "calls": spend.get(c.id, {}).get("calls", 0),
+            "spent": spend.get(c.id, {}).get("spent", Decimal(0)),
+        }
+        for c in customers
+    ]
+    rows.sort(key=lambda r: (r["spent"], r["calls"]), reverse=True)
     return templates.TemplateResponse(
-        request, "admin_customers.html", {"customer": customer, "rows": rows}
+        request,
+        "admin_customers.html",
+        {
+            "customer": customer,
+            "rows": rows,
+            "month": label,
+            "prev_month": _shift_month(label, -1),
+            "next_month": _shift_month(label, 1),
+            "is_current_month": label == _parse_month(None)[2],
+            "total_spent": sum((r["spent"] for r in rows), Decimal(0)),
+            "total_calls": sum(r["calls"] for r in rows),
+        },
+    )
+
+
+@app.get("/admin/customers.csv")
+async def admin_customers_csv(
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    month: str | None = None,
+):
+    """Выгрузка для бухгалтерии/распределения бюджета на следующий месяц —
+    иначе цифры пришлось бы переписывать из таблицы руками."""
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    start, end, label = _parse_month(month)
+    spend = await _spend_by_customer(session, start, end)
+    customers = (
+        await session.execute(select(Customer).order_by(Customer.name))
+    ).scalars().all()
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(["Период", "Имя", "Email", "Роль", "Вызовов", "Потрачено, ₽", "Баланс, ₽"])
+    for c in customers:
+        stats = spend.get(c.id, {})
+        writer.writerow(
+            [
+                label,
+                c.name,
+                c.email,
+                c.role,
+                stats.get("calls", 0),
+                f"{stats.get('spent', Decimal(0)):.4f}".replace(".", ","),
+                f"{c.balance_rub:.4f}".replace(".", ","),
+            ]
+        )
+    # BOM и ; как разделитель — иначе русский Excel открывает файл одной
+    # колонкой и портит кириллицу.
+    body = "﻿" + buffer.getvalue()
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="flawless-{label}.csv"'},
     )
 
 
@@ -1152,6 +1265,7 @@ async def admin_customer_detail(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
     session: AsyncSession = Depends(get_session),
+    month: str | None = None,
 ):
     redirect = _require_admin(customer)
     if redirect is not None:
@@ -1159,6 +1273,57 @@ async def admin_customer_detail(
     target = await session.get(Customer, customer_id)
     if target is None:
         raise HTTPException(status_code=404)
+    start, end, label = _parse_month(month)
+
+    in_period = (
+        UsageEvent.billing_customer_id == target.id,
+        UsageEvent.charged_rub.is_not(None),
+        UsageEvent.created_at >= start,
+        UsageEvent.created_at < end,
+    )
+
+    by_model = [
+        {"model": model, "calls": calls, "spent": spent, "cost": cost}
+        for model, calls, spent, cost in (
+            await session.execute(
+                select(
+                    UsageEvent.model,
+                    func.count(UsageEvent.id),
+                    func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+                    func.coalesce(func.sum(UsageEvent.cost_usd * UsageEvent.usd_rub_rate), 0),
+                )
+                .where(*in_period)
+                .group_by(UsageEvent.model)
+                .order_by(func.coalesce(func.sum(UsageEvent.charged_rub), 0).desc())
+            )
+        ).all()
+    ]
+
+    # По дням группируем в Python: приведение timestamptz к дате в SQL зависит
+    # от таймзоны сессии Postgres, и сутки могли бы съезжать. Данных здесь —
+    # события одного человека за один месяц, это дёшево.
+    daily: dict[str, dict] = {}
+    for created_at, charged in (
+        await session.execute(
+            select(UsageEvent.created_at, UsageEvent.charged_rub).where(*in_period)
+        )
+    ).all():
+        day = created_at.astimezone(timezone.utc).strftime("%d.%m")
+        bucket = daily.setdefault(day, {"calls": 0, "spent": Decimal(0)})
+        bucket["calls"] += 1
+        bucket["spent"] += charged
+    by_day = [{"day": day, **stats} for day, stats in sorted(daily.items(), reverse=True)]
+
+    period_spent = sum((row["spent"] for row in by_model), Decimal(0))
+    period_calls = sum(row["calls"] for row in by_model)
+    lifetime_spent = (
+        await session.execute(
+            select(func.coalesce(func.sum(UsageEvent.charged_rub), 0)).where(
+                UsageEvent.billing_customer_id == target.id, UsageEvent.charged_rub.is_not(None)
+            )
+        )
+    ).scalar_one()
+
     ledger = (
         await session.execute(
             select(WalletLedger)
@@ -1167,10 +1332,24 @@ async def admin_customer_detail(
             .limit(50)
         )
     ).scalars().all()
+
     return templates.TemplateResponse(
         request,
         "admin_customer_detail.html",
-        {"customer": customer, "target": target, "ledger": ledger},
+        {
+            "customer": customer,
+            "target": target,
+            "ledger": ledger,
+            "month": label,
+            "prev_month": _shift_month(label, -1),
+            "next_month": _shift_month(label, 1),
+            "is_current_month": label == _parse_month(None)[2],
+            "by_model": by_model,
+            "by_day": by_day,
+            "period_spent": period_spent,
+            "period_calls": period_calls,
+            "lifetime_spent": lifetime_spent,
+        },
     )
 
 

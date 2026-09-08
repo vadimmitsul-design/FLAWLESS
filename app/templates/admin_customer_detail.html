@@ -16,12 +16,19 @@
 
 <div style="display:grid;grid-template-columns:1fr 1.6fr;gap:20px;align-items:start;">
 
-  <div class="card" style="margin-bottom:0;">
-    <div class="muted">Баланс</div>
-    <div class="stat" style="font-size:26px;{% if target.balance_rub < 0 %}color:var(--bad);{% endif %}">{{ "%.4f"|format(target.balance_rub) }} ₽</div>
-    {% if target.balance_rub < 0 %}
-    <p class="muted" style="margin-bottom:0;color:var(--bad);">Баланс в минусе — списание превысило резерв.</p>
-    {% endif %}
+  <div style="display:flex;flex-direction:column;gap:20px;">
+    <div class="card" style="margin-bottom:0;">
+      <div class="muted">Баланс</div>
+      <div class="stat" style="font-size:26px;{% if target.balance_rub < 0 %}color:var(--bad);{% endif %}">{{ "%.4f"|format(target.balance_rub) }} ₽</div>
+      {% if target.balance_rub < 0 %}
+      <p class="muted" style="margin-bottom:0;color:var(--bad);">Баланс в минусе — списание превысило резерв.</p>
+      {% endif %}
+    </div>
+    <div class="card" style="margin-bottom:0;">
+      <div class="muted">Потрачено за {{ month }}</div>
+      <div class="stat" style="font-size:26px;color:var(--accent-2);">{{ "%.4f"|format(period_spent) }} ₽</div>
+      <div class="muted" style="margin-top:2px;">{{ period_calls }} вызовов · за всё время {{ "%.4f"|format(lifetime_spent) }} ₽</div>
+    </div>
   </div>
 
   <div class="card" style="margin-bottom:0;">
@@ -45,6 +52,57 @@
       <input id="note" name="note" required placeholder="например, бюджет на сентябрь">
       <button type="submit" style="margin-top:1.25rem;">Провести</button>
     </form>
+  </div>
+</div>
+
+<div class="row" style="gap:14px;margin:26px 0 16px;">
+  <a href="/admin/customers/{{ target.id }}?month={{ prev_month }}" style="font-size:14px;">← {{ prev_month }}</a>
+  <span class="mono" style="font-size:16px;font-weight:700;">{{ month }}</span>
+  {% if not is_current_month %}
+  <a href="/admin/customers/{{ target.id }}?month={{ next_month }}" style="font-size:14px;">{{ next_month }} →</a>
+  {% endif %}
+</div>
+
+<div style="display:grid;grid-template-columns:1.3fr 1fr;gap:20px;align-items:start;">
+  <div class="card" style="margin-bottom:0;">
+    <h3 style="font-size:16px;margin-bottom:16px;">По моделям за {{ month }}</h3>
+    {% if not by_model %}
+    <p class="muted">В этом месяце вызовов не было.</p>
+    {% else %}
+    <table>
+      <thead><tr><th>Модель</th><th>Вызовов</th><th>Списано</th><th>Себестоимость</th></tr></thead>
+      <tbody>
+      {% for m in by_model %}
+      <tr>
+        <td class="mono">{{ m.model }}</td>
+        <td class="mono">{{ m.calls }}</td>
+        <td class="mono">{{ "%.4f"|format(m.spent) }} ₽</td>
+        <td class="mono muted">{{ "%.4f"|format(m.cost) }} ₽</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card" style="margin-bottom:0;">
+    <h3 style="font-size:16px;margin-bottom:16px;">По дням</h3>
+    {% if not by_day %}
+    <p class="muted">Нет данных за месяц.</p>
+    {% else %}
+    <table>
+      <thead><tr><th>День</th><th>Вызовов</th><th>Списано</th></tr></thead>
+      <tbody>
+      {% for d in by_day %}
+      <tr>
+        <td class="mono">{{ d.day }}</td>
+        <td class="mono">{{ d.calls }}</td>
+        <td class="mono">{{ "%.4f"|format(d.spent) }} ₽</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
   </div>
 </div>
 

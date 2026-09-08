@@ -2,34 +2,59 @@
 {% block title %}Люди — Flawless{% endblock %}
 {% block content %}
 <div class="wrap" style="padding:40px 32px 80px;">
-<h1 style="font-size:22px;margin-bottom:8px;">Люди</h1>
-<p class="muted" style="margin-top:0;">Отключение действует немедленно — и на вход в кабинет, и на все API-ключи этого человека. Включить обратно можно тут же.</p>
+
+<div class="row" style="justify-content:space-between;margin-bottom:8px;">
+  <h1 style="font-size:22px;">Люди</h1>
+  <a href="/admin/customers.csv?month={{ month }}" style="font-size:14px;font-weight:600;">Выгрузить в CSV</a>
+</div>
+<p class="muted" style="margin-top:0;">Расход считается по кошельку: если у человека есть детские аккаунты, их вызовы входят сюда же. Отключение действует немедленно — и на вход в кабинет, и на все API-ключи.</p>
+
+<div class="row" style="gap:14px;margin:20px 0;">
+  <a href="/admin/customers?month={{ prev_month }}" style="font-size:14px;">← {{ prev_month }}</a>
+  <span class="mono" style="font-size:16px;font-weight:700;">{{ month }}</span>
+  {% if not is_current_month %}
+  <a href="/admin/customers?month={{ next_month }}" style="font-size:14px;">{{ next_month }} →</a>
+  {% endif %}
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-bottom:20px;max-width:520px;">
+  <div class="card" style="margin-bottom:0;">
+    <div class="muted">Потрачено за {{ month }}</div>
+    <div class="stat" style="font-size:24px;color:var(--accent-2);">{{ "%.4f"|format(total_spent) }} ₽</div>
+  </div>
+  <div class="card" style="margin-bottom:0;">
+    <div class="muted">Вызовов за месяц</div>
+    <div class="stat" style="font-size:24px;">{{ total_calls }}</div>
+  </div>
+</div>
+
 <div class="card" style="margin-bottom:0;">
 {% if not rows %}
 <p class="muted">Пока никого нет.</p>
 {% else %}
 <table>
-<thead><tr><th>Имя</th><th>Роль</th><th>Баланс</th><th>Регистрация</th><th>Статус</th><th>Действие</th></tr></thead>
+<thead><tr><th>Имя</th><th>Роль</th><th>Потрачено за {{ month }}</th><th>Вызовов</th><th>Баланс</th><th>Статус</th><th>Действие</th></tr></thead>
 <tbody>
-{% for c in rows %}
-<tr{% if not c.active %} style="opacity:.55;"{% endif %}>
-  <td><a href="/admin/customers/{{ c.id }}" style="font-weight:600;">{{ c.name }}</a><div class="muted" style="margin:0;">{{ c.email }}</div></td>
+{% for r in rows %}
+<tr{% if not r.c.active %} style="opacity:.55;"{% endif %}>
+  <td><a href="/admin/customers/{{ r.c.id }}?month={{ month }}" style="font-weight:600;">{{ r.c.name }}</a><div class="muted" style="margin:0;">{{ r.c.email }}</div></td>
   <td>
-    {% if c.role == 'admin' %}<span class="badge badge-role mono">admin</span>
-    {% elif c.is_child %}<span class="badge badge-warn">ребёнок</span>
+    {% if r.c.role == 'admin' %}<span class="badge badge-role mono">admin</span>
+    {% elif r.c.is_child %}<span class="badge badge-warn">ребёнок</span>
     {% else %}<span class="muted">клиент</span>{% endif %}
   </td>
-  <td class="mono">{{ "%.4f"|format(c.balance_rub) }} ₽</td>
-  <td style="color:var(--text-faint);">{{ c.created_at.strftime("%d.%m.%Y") }}</td>
+  <td class="mono" style="{% if r.spent %}color:var(--accent-2);{% else %}color:var(--text-faint);{% endif %}">{{ "%.4f"|format(r.spent) }} ₽</td>
+  <td class="mono">{{ r.calls }}</td>
+  <td class="mono" style="{% if r.c.balance_rub < 0 %}color:var(--bad);{% endif %}">{{ "%.4f"|format(r.c.balance_rub) }} ₽</td>
   <td>
-    {% if c.active %}<span class="badge badge-ok">активен</span>
+    {% if r.c.active %}<span class="badge badge-ok">активен</span>
     {% else %}<span class="badge badge-bad">отключён</span>{% endif %}
   </td>
   <td>
-    {% if c.id != customer.id %}
-    <form class="inline" method="post" action="/admin/customers/{{ c.id }}/toggle-active">
+    {% if r.c.id != customer.id %}
+    <form class="inline" method="post" action="/admin/customers/{{ r.c.id }}/toggle-active">
       <button type="submit" class="secondary" style="height:34px;padding:0 12px;font-size:13px;">
-        {{ "Отключить" if c.active else "Включить" }}
+        {{ "Отключить" if r.c.active else "Включить" }}
       </button>
     </form>
     {% else %}
