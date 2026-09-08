@@ -13,7 +13,7 @@
 <tbody>
 {% for c in rows %}
 <tr{% if not c.active %} style="opacity:.55;"{% endif %}>
-  <td>{{ c.name }}<div class="muted" style="margin:0;">{{ c.email }}</div></td>
+  <td><a href="/admin/customers/{{ c.id }}" style="font-weight:600;">{{ c.name }}</a><div class="muted" style="margin:0;">{{ c.email }}</div></td>
   <td>
     {% if c.role == 'admin' %}<span class="badge badge-role mono">admin</span>
     {% elif c.is_child %}<span class="badge badge-warn">ребёнок</span>

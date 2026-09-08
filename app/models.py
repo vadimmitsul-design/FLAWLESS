@@ -114,14 +114,23 @@ class ModelPrice(Base):
 
 class PricingConfig(Base):
     """Одна строка (id=1): наценка % и курс USD->RUB для перевода
-    себестоимости в цену клиента. Правится админом, не кодом/редеплоем.
+    себестоимости в цену клиента. Правится админом на /admin/pricing.
+
+    Задним числом ничего не пересчитывается: markup_percent и usd_rub_rate
+    копируются в каждый UsageEvent в момент вызова (см. billing.finalize_*),
+    поэтому смена значений влияет только на будущие вызовы.
     """
 
     __tablename__ = "pricing_config"
+    __table_args__ = (
+        CheckConstraint("markup_percent >= 0", name="ck_pricing_config_markup_non_negative"),
+        CheckConstraint("usd_rub_rate > 0", name="ck_pricing_config_rate_positive"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     markup_percent: Mapped[Decimal] = mapped_column(Numeric(6, 2))
     usd_rub_rate: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    updated_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=utcnow
     )
@@ -307,6 +316,11 @@ class WalletLedger(Base):
     usage_event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("usage_events.id"))
     topup_request_id: Mapped[int | None] = mapped_column(ForeignKey("topup_requests.id"))
     subscription_order_id: Mapped[int | None] = mapped_column(ForeignKey("subscription_orders.id"))
+    # Кто из админов провёл запись руками (начисление бюджета, корректировка).
+    # NULL — запись сделана самим сервисом: списание за вызов, роялти,
+    # покупка в магазине, подтверждение заявки на пополнение (там автор
+    # хранится в самой заявке, decided_by_admin_id).
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

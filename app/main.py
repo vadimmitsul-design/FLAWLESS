@@ -1146,6 +1146,128 @@ async def admin_toggle_customer_active(
     return RedirectResponse("/admin/customers", status_code=303)
 
 
+@app.get("/admin/customers/{customer_id}")
+async def admin_customer_detail(
+    customer_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    target = await session.get(Customer, customer_id)
+    if target is None:
+        raise HTTPException(status_code=404)
+    ledger = (
+        await session.execute(
+            select(WalletLedger)
+            .where(WalletLedger.customer_id == target.id)
+            .order_by(WalletLedger.created_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    return templates.TemplateResponse(
+        request,
+        "admin_customer_detail.html",
+        {"customer": customer, "target": target, "ledger": ledger},
+    )
+
+
+@app.post("/admin/customers/{customer_id}/balance")
+async def admin_change_balance(
+    customer_id: int,
+    amount_rub: Decimal = Form(...),
+    entry_type: str = Form("adjustment"),
+    note: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    if entry_type not in ("topup", "adjustment"):
+        raise HTTPException(status_code=400, detail="entry_type must be topup or adjustment")
+    if amount_rub == 0:
+        raise HTTPException(status_code=400, detail="amount must not be zero")
+    if not note.strip():
+        # Ручное движение денег без объяснения через полгода не расшифровать —
+        # для того и заводили created_by_admin_id рядом.
+        raise HTTPException(status_code=400, detail="note is required for manual balance changes")
+    target = await session.get(Customer, customer_id)
+    if target is None:
+        raise HTTPException(status_code=404)
+    await billing.admin_adjust_balance(
+        session,
+        customer_id=target.id,
+        delta_rub=amount_rub,
+        entry_type=entry_type,
+        note=note.strip(),
+        admin_id=customer.id,
+    )
+    return RedirectResponse(f"/admin/customers/{target.id}", status_code=303)
+
+
+_PRICING_EXAMPLE_COST_USD = Decimal("0.01")
+
+
+async def _pricing_page_context(session: AsyncSession, customer: Customer, error: str | None):
+    """Пример «во сколько обойдётся вызов» считаем здесь, а не в шаблоне:
+    в Jinja литерал 0.01 — float, а markup/rate — Decimal, и их произведение
+    роняет рендер TypeError'ом (поймано тестом до боя)."""
+    cfg = await billing.get_pricing_config(session)
+    updated_by = (
+        await session.get(Customer, cfg.updated_by_admin_id) if cfg.updated_by_admin_id else None
+    )
+    return {
+        "customer": customer,
+        "cfg": cfg,
+        "updated_by": updated_by,
+        "error": error,
+        "example_rub": billing.price_in_rub(_PRICING_EXAMPLE_COST_USD, cfg),
+    }
+
+
+@app.get("/admin/pricing")
+async def admin_pricing(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    return templates.TemplateResponse(
+        request, "admin_pricing.html", await _pricing_page_context(session, customer, None)
+    )
+
+
+@app.post("/admin/pricing")
+async def admin_update_pricing(
+    request: Request,
+    markup_percent: Decimal = Form(...),
+    usd_rub_rate: Decimal = Form(...),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    if markup_percent < 0 or usd_rub_rate <= 0:
+        return templates.TemplateResponse(
+            request,
+            "admin_pricing.html",
+            await _pricing_page_context(
+                session,
+                customer,
+                "Наценка не может быть отрицательной, курс — нулевым или отрицательным",
+            ),
+            status_code=400,
+        )
+    await billing.update_pricing_config(session, markup_percent, usd_rub_rate, admin_id=customer.id)
+    return RedirectResponse("/admin/pricing", status_code=303)
+
+
 @app.get("/admin/invites")
 async def admin_invites(
     request: Request,

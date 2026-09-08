@@ -356,6 +356,57 @@ async def reject_topup(session: AsyncSession, topup: TopupRequest, admin_id: int
     await session.commit()
 
 
+async def admin_adjust_balance(
+    session: AsyncSession,
+    customer_id: int,
+    delta_rub: Decimal,
+    entry_type: str,
+    note: str,
+    admin_id: int,
+) -> Decimal:
+    """Прямая операция админа с балансом — без встречной заявки от клиента.
+    Раньше баланс можно было пополнить ТОЛЬКО подтвердив заявку, которую
+    клиент подал сам: выдать десяти разработчикам месячный бюджет означало
+    десять заявок от них и десять подтверждений от админа.
+
+    entry_type различает смысл, а не механику (обе записи одинаково двигают
+    баланс), и от него зависят цифры в /admin/overview:
+      topup      — реальные деньги пришли, попадает в «Кассу»;
+      adjustment — начисление внутреннего бюджета или исправление ошибки,
+                   кассой НЕ является.
+    Минус разрешён осознанно: после сбоя в биллинге нужно уметь и забрать.
+    """
+    payer = await session.get(Customer, customer_id, with_for_update=True)
+    if payer is None:
+        raise ValueError(f"customer {customer_id} not found")
+    session.add(
+        WalletLedger(
+            customer_id=payer.id,
+            entry_type=entry_type,
+            delta_rub=delta_rub,
+            created_by_admin_id=admin_id,
+            note=note,
+        )
+    )
+    payer.balance_rub += delta_rub
+    await session.commit()
+    return payer.balance_rub
+
+
+async def update_pricing_config(
+    session: AsyncSession, markup_percent: Decimal, usd_rub_rate: Decimal, admin_id: int
+) -> PricingConfig:
+    """Наценка и курс задним числом ничего не пересчитывают: оба значения
+    копируются в UsageEvent в момент вызова, поэтому влияют только на будущие
+    вызовы. Раньше правились единственным способом — SQL в боевой базе."""
+    cfg = await get_pricing_config(session)
+    cfg.markup_percent = markup_percent
+    cfg.usd_rub_rate = usd_rub_rate
+    cfg.updated_by_admin_id = admin_id
+    await session.commit()
+    return cfg
+
+
 async def purchase_subscription(
     session: AsyncSession, customer_id: int, product: Product, account_email: str, note: str | None
 ) -> SubscriptionOrder:
