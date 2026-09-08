@@ -29,6 +29,22 @@
       <div class="stat" style="font-size:26px;color:var(--accent-2);">{{ "%.4f"|format(period_spent) }} ₽</div>
       <div class="muted" style="margin-top:2px;">{{ period_calls }} вызовов · за всё время {{ "%.4f"|format(lifetime_spent) }} ₽</div>
     </div>
+
+    <div class="card" style="margin-bottom:0;">
+      <h3 style="font-size:15px;margin-bottom:4px;">Потолок расхода</h3>
+      <p class="muted" style="margin-top:0;">Действует во всех трёх дверях сразу: API, веб-чат, Telegram. Пусто — без потолка.</p>
+      <form method="post" action="/admin/customers/{{ target.id }}/limits">
+        <label for="daily_limit_rub">В день, ₽</label>
+        <input id="daily_limit_rub" name="daily_limit_rub" type="number" step="0.01" min="0"
+               value="{{ '%.2f'|format(target.daily_limit_rub) if target.daily_limit_rub is not none else '' }}"
+               placeholder="без ограничения">
+        <label for="monthly_limit_rub">В месяц, ₽</label>
+        <input id="monthly_limit_rub" name="monthly_limit_rub" type="number" step="0.01" min="0"
+               value="{{ '%.2f'|format(target.monthly_limit_rub) if target.monthly_limit_rub is not none else '' }}"
+               placeholder="без ограничения">
+        <button type="submit" class="secondary" style="margin-top:1rem;">Сохранить потолок</button>
+      </form>
+    </div>
   </div>
 
   <div class="card" style="margin-bottom:0;">

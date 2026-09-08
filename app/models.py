@@ -8,6 +8,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     Text,
@@ -48,6 +49,13 @@ class Customer(Base):
     name: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, default="customer", server_default="customer")
     balance_rub: Mapped[Decimal] = mapped_column(Numeric(14, 4), default=0, server_default="0")
+    # Потолок расхода на ЧЕЛОВЕКА (точнее — на кошелёк), поверх лимитов
+    # отдельных ключей. Действует во всех трёх дверях сразу: API, веб-чат,
+    # Telegram. Лимит на ключе обходился выпуском второго ключа или переходом
+    # в чат, этот — нет. Ставит админ: это бюджетный контроль компании,
+    # а не самоограничение клиента. NULL = без потолка.
+    daily_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
+    monthly_limit_rub: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     is_child: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     parent_customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
@@ -149,6 +157,9 @@ class UsageEvent(Base):
         # видеть чужой ответ при случайном совпадении ключа (см. CLAUDE.md,
         # находка состязательного ревью 2026-09-04).
         UniqueConstraint("customer_id", "idempotency_key", name="uq_usage_events_customer_idempotency_key"),
+        # Под расчёт потолка расхода на кошелёк: SUM(charged_rub) по
+        # billing_customer_id за период — выполняется перед каждым вызовом.
+        Index("ix_usage_events_billing_customer_created", "billing_customer_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

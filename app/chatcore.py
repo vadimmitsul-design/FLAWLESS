@@ -7,18 +7,29 @@ import time
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import billing, dlp, llm, pricing
+from app import billing, dlp, llm, pricing, ratelimit
+
+
+class TooManyRequests(Exception):
+    """Слишком частые обращения от одного человека."""
 
 
 async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: str, messages: list[dict]) -> str:
     """Списывает с баланса ПЛАТЕЛЬЩИКА (см. billing.resolve_billing_customer_id
     для детских аккаунтов), возвращает текст ответа ассистента. Бросает
-    billing.InsufficientBalance/KeyError (неизвестная модель) — вызывающий
-    код сам решает, как это показать пользователю."""
+    billing.InsufficientBalance/SpendLimitExceeded/KeyError (неизвестная
+    модель) — вызывающий код сам решает, как это показать пользователю."""
     from app.models import Customer, utcnow  # локальный импорт — избежать цикла на уровне модуля
 
     customer = await session.get(Customer, customer_id)
     billing_customer_id = billing.resolve_billing_customer_id(customer)
+
+    # Те же ограничители, что у остальных дверей: раньше Telegram не проверял
+    # ни частоту, ни потолок расхода вообще.
+    if not ratelimit.check(ratelimit.customer_bucket(customer_id)):
+        raise TooManyRequests()
+    await billing.check_spend_limits(session, billing_customer_id)
+
     provider, model = llm.resolve_alias(model_alias)
 
     redacted_messages, dlp_found = dlp.redact_messages(messages)

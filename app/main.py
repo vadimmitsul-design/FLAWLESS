@@ -1407,6 +1407,39 @@ async def _pricing_page_context(session: AsyncSession, customer: Customer, error
     }
 
 
+@app.post("/admin/customers/{customer_id}/limits")
+async def admin_set_customer_limits(
+    customer_id: int,
+    daily_limit_rub: str = Form(""),
+    monthly_limit_rub: str = Form(""),
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Потолок расхода на человека. В отличие от лимитов на ключе (их ставит
+    сам клиент), этот — бюджетный контроль компании, поэтому только админ.
+    Пусто = без потолка."""
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    target = await session.get(Customer, customer_id)
+    if target is None:
+        raise HTTPException(status_code=404)
+
+    def _parse(raw: str) -> Decimal | None:
+        raw = raw.strip()
+        if not raw:
+            return None
+        value = Decimal(raw)
+        if value < 0:
+            raise HTTPException(status_code=400, detail="limit must not be negative")
+        return value
+
+    target.daily_limit_rub = _parse(daily_limit_rub)
+    target.monthly_limit_rub = _parse(monthly_limit_rub)
+    await session.commit()
+    return RedirectResponse(f"/admin/customers/{target.id}", status_code=303)
+
+
 @app.get("/admin/pricing")
 async def admin_pricing(
     request: Request,
@@ -1640,24 +1673,27 @@ async def chat_completions(
 ):
     customer, api_key = auth
 
-    if not ratelimit.check(api_key.id):
+    if not ratelimit.check(ratelimit.api_key_bucket(api_key.id)):
         raise HTTPException(
             status_code=429,
             detail={"error": {"message": "rate limit exceeded, slow down", "type": "rate_limit_error"}},
         )
 
-    # 2.2 доработок: дневной/месячный потолок расхода НА ЭТОТ КЛЮЧ — до
-    # резерва/вызова провайдера, чтобы не тратить деньги на заведомо
-    # заблокированный запрос.
+    # Потолки расхода — до резерва и вызова провайдера, чтобы не тратить
+    # деньги на заведомо заблокированный запрос. Проверяются оба уровня:
+    # на кошельке (не обходится вторым ключом) и на самом ключе.
     try:
-        await billing.check_api_key_spend_limits(session, api_key)
+        await billing.check_spend_limits(
+            session, billing.resolve_billing_customer_id(customer), api_key
+        )
     except billing.SpendLimitExceeded as e:
         raise HTTPException(
             status_code=429,
             detail={
                 "error": {
-                    "message": f"{e.period} spend limit exceeded for this API key",
+                    "message": f"{e.period} spend limit exceeded for this {e.scope}",
                     "type": "spend_limit_exceeded",
+                    "scope": e.scope,
                     "limit_rub": str(e.limit),
                     "spent_rub": str(e.spent),
                 }
@@ -2118,6 +2154,19 @@ async def web_chat_send(
 ):
     if customer is None:
         raise HTTPException(status_code=401)
+
+    # Те же ограничители, что и у API-двери: раньше веб-чат не проверял
+    # ни частоту, ни потолок расхода — лимит обходился переходом сюда.
+    # Частота считается по человеку (ключа здесь нет), потолок — по кошельку.
+    if not ratelimit.check(ratelimit.customer_bucket(customer.id)):
+        raise HTTPException(status_code=429, detail="Слишком часто — подождите немного")
+    try:
+        await billing.check_spend_limits(session, billing.resolve_billing_customer_id(customer))
+    except billing.SpendLimitExceeded as e:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Достигнут лимит расхода ({e.period}): потрачено {e.spent} ₽ из {e.limit} ₽",
+        )
 
     try:
         provider, model_name = llm.resolve_alias(model)

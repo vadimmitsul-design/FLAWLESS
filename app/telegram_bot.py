@@ -129,6 +129,16 @@ async def _handle_update(update: dict) -> None:
         except billing.InsufficientBalance:
             await send_message(chat_id, f"{prefix}Недостаточно средств на балансе — пополните в личном кабинете Flawless.")
             return
+        except billing.SpendLimitExceeded as e:
+            await send_message(
+                chat_id,
+                f"{prefix}Достигнут лимит расхода ({'дневной' if e.period == 'daily' else 'месячный'}): "
+                f"потрачено {e.spent} ₽ из {e.limit} ₽. Лимит меняет администратор.",
+            )
+            return
+        except chatcore.TooManyRequests:
+            await send_message(chat_id, f"{prefix}Слишком часто — подождите немного и повторите.")
+            return
         except Exception as e:
             logger.warning("telegram chat turn failed: %r", e)
             await send_message(chat_id, f"{prefix}Провайдер сейчас недоступен, попробуйте ещё раз.")

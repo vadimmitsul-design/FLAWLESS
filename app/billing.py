@@ -10,6 +10,7 @@
 append-only, как везде в этом кодовом кусте.
 """
 
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -35,11 +36,12 @@ _RUB_QUANT = Decimal("0.0001")
 
 
 class SpendLimitExceeded(Exception):
-    def __init__(self, period: str, limit: Decimal, spent: Decimal):
-        self.period = period
+    def __init__(self, period: str, scope: str, limit: Decimal, spent: Decimal):
+        self.period = period  # daily | monthly
+        self.scope = scope  # customer (кошелёк целиком) | key (конкретный API-ключ)
         self.limit = limit
         self.spent = spent
-        super().__init__(f"{period} spend limit exceeded: spent {spent} >= limit {limit}")
+        super().__init__(f"{scope} {period} spend limit exceeded: spent {spent} >= limit {limit}")
 
 
 class InsufficientBalance(Exception):
@@ -72,46 +74,81 @@ def _effective_limit(client_limit: Decimal | None, admin_limit: Decimal | None) 
     return min(client_limit, admin_limit)
 
 
-async def check_api_key_spend_limits(session: AsyncSession, api_key: ApiKey) -> None:
-    """2.2 доработок: дневной/месячный потолок расхода НА КЛЮЧ (не на
-    клиента в целом — у клиента может быть несколько ключей с разными
-    лимитами под разные интеграции). Считаем по charged_rub — только то,
-    что реально списано (finalize_success/finalize_failure), не по резервам:
-    иначе временный всплеск pending-резервов ложно триггерил бы лимит.
-    Границы периодов — календарные сутки/месяц по UTC."""
-    daily_limit = _effective_limit(api_key.daily_limit_rub, api_key.admin_daily_limit_rub)
-    monthly_limit = _effective_limit(api_key.monthly_limit_rub, api_key.admin_monthly_limit_rub)
+async def _spent_since(
+    session: AsyncSession,
+    since: datetime,
+    *,
+    billing_customer_id: int | None = None,
+    api_key_id: int | None = None,
+) -> Decimal:
+    """Сумма РЕАЛЬНО списанного (charged_rub) с начала периода. Не по
+    резервам: временный всплеск pending-резервов ложно триггерил бы лимит."""
+    stmt = select(func.coalesce(func.sum(UsageEvent.charged_rub), 0)).where(
+        UsageEvent.created_at >= since, UsageEvent.charged_rub.is_not(None)
+    )
+    if billing_customer_id is not None:
+        stmt = stmt.where(UsageEvent.billing_customer_id == billing_customer_id)
+    if api_key_id is not None:
+        stmt = stmt.where(UsageEvent.api_key_id == api_key_id)
+    return (await session.execute(stmt)).scalar_one()
+
+
+async def _enforce_limits(
+    session: AsyncSession,
+    scope: str,
+    daily_limit: Decimal | None,
+    monthly_limit: Decimal | None,
+    **filters,
+) -> None:
+    """Границы периодов — календарные сутки/месяц по UTC."""
     if daily_limit is None and monthly_limit is None:
         return
-
     now = utcnow()
     if daily_limit is not None:
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        spent_today = (
-            await session.execute(
-                select(func.coalesce(func.sum(UsageEvent.charged_rub), 0)).where(
-                    UsageEvent.api_key_id == api_key.id,
-                    UsageEvent.created_at >= day_start,
-                    UsageEvent.charged_rub.is_not(None),
-                )
-            )
-        ).scalar_one()
-        if spent_today >= daily_limit:
-            raise SpendLimitExceeded("daily", daily_limit, spent_today)
-
+        spent = await _spent_since(session, day_start, **filters)
+        if spent >= daily_limit:
+            raise SpendLimitExceeded("daily", scope, daily_limit, spent)
     if monthly_limit is not None:
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        spent_month = (
-            await session.execute(
-                select(func.coalesce(func.sum(UsageEvent.charged_rub), 0)).where(
-                    UsageEvent.api_key_id == api_key.id,
-                    UsageEvent.created_at >= month_start,
-                    UsageEvent.charged_rub.is_not(None),
-                )
-            )
-        ).scalar_one()
-        if spent_month >= monthly_limit:
-            raise SpendLimitExceeded("monthly", monthly_limit, spent_month)
+        spent = await _spent_since(session, month_start, **filters)
+        if spent >= monthly_limit:
+            raise SpendLimitExceeded("monthly", scope, monthly_limit, spent)
+
+
+async def check_spend_limits(
+    session: AsyncSession, billing_customer_id: int, api_key: ApiKey | None = None
+) -> None:
+    """ЕДИНАЯ проверка потолков расхода для всех трёх дверей (API, веб-чат,
+    Telegram) — одна точка вызова на вход, чтобы дверь нельзя было добавить,
+    забыв про лимит (именно так и появился пробел: проверка жила только в
+    /v1/chat/completions).
+
+    Два уровня, оба должны пройти:
+      - на КОШЕЛЬКЕ (billing_customer_id) — потолок на человека, ставит админ.
+        Не обходится ни вторым ключом, ни переходом в чат: считается по всем
+        событиям кошелька независимо от того, каким путём пришёл вызов.
+        Для детского аккаунта это кошелёк родителя — он и платит;
+      - на КЛЮЧЕ, если вызов пришёл по API-ключу: более узкая рамка внутри
+        общего потолка (например, отдельный ключ для CI с малым лимитом).
+    """
+    payer = await session.get(Customer, billing_customer_id)
+    if payer is not None:
+        await _enforce_limits(
+            session,
+            "customer",
+            payer.daily_limit_rub,
+            payer.monthly_limit_rub,
+            billing_customer_id=payer.id,
+        )
+    if api_key is not None:
+        await _enforce_limits(
+            session,
+            "key",
+            _effective_limit(api_key.daily_limit_rub, api_key.admin_daily_limit_rub),
+            _effective_limit(api_key.monthly_limit_rub, api_key.admin_monthly_limit_rub),
+            api_key_id=api_key.id,
+        )
 
 
 async def find_event_by_idempotency_key(
