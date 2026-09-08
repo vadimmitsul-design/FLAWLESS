@@ -65,6 +65,36 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 _SIGNUP_MODES = {"invite", "open", "closed"}
 
 
+class _FeatureFlags:
+    """Флаги разделов для шаблонов. Отдаём именно их, а не весь `settings`:
+    иначе любой шаблон мог бы отрендерить session_secret или ключи. Значения
+    читаются на лету, а не снимаются копией при импорте, — иначе подмена
+    настройки в тестах не доходила бы до разметки."""
+
+    @property
+    def instance_name(self) -> str:
+        return settings.instance_name
+
+    @property
+    def enable_shop(self) -> bool:
+        return settings.enable_shop
+
+    @property
+    def enable_prompts(self) -> bool:
+        return settings.enable_prompts
+
+    @property
+    def enable_children(self) -> bool:
+        return settings.enable_children
+
+    @property
+    def enable_archive(self) -> bool:
+        return settings.enable_archive
+
+
+templates.env.globals["features"] = _FeatureFlags()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if session_secret_is_weak(settings.session_secret):
@@ -117,6 +147,32 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.environment == "production",
 )
+
+
+def _require_feature(enabled: bool) -> None:
+    """Выключенный раздел отдаёт 404, а не 403: снаружи он должен выглядеть
+    так, будто его в этой сборке просто нет. Прятать раздел только из
+    навигации мало — адрес продолжал бы работать."""
+    if not enabled:
+        raise HTTPException(status_code=404)
+
+
+# Вешаются на сами маршруты через dependencies=[...], а не проверяются внутри
+# тела функции: так про них нельзя забыть, дописывая обработчик.
+def _feature_shop() -> None:
+    _require_feature(settings.enable_shop)
+
+
+def _feature_prompts() -> None:
+    _require_feature(settings.enable_prompts)
+
+
+def _feature_children() -> None:
+    _require_feature(settings.enable_children)
+
+
+def _feature_archive() -> None:
+    _require_feature(settings.enable_archive)
 
 
 def _require_admin(customer: Customer | None) -> RedirectResponse | None:
@@ -421,7 +477,7 @@ async def new_topup(
 # ---------- веб: магазин подписок (платёжный агент) ----------
 
 
-@app.get("/shop")
+@app.get("/shop", dependencies=[Depends(_feature_shop)])
 async def shop(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
@@ -445,7 +501,7 @@ async def shop(
     )
 
 
-@app.post("/shop/order")
+@app.post("/shop/order", dependencies=[Depends(_feature_shop)])
 async def shop_order(
     request: Request,
     product_id: int = Form(...),
@@ -492,7 +548,7 @@ async def shop_order(
 # ---------- веб: библиотека промптов ----------
 
 
-@app.get("/prompts")
+@app.get("/prompts", dependencies=[Depends(_feature_prompts)])
 async def prompts_list(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
@@ -518,7 +574,7 @@ async def prompts_list(
     )
 
 
-@app.post("/prompts")
+@app.post("/prompts", dependencies=[Depends(_feature_prompts)])
 async def create_prompt(
     title: str = Form(...),
     description: str = Form(""),
@@ -557,7 +613,7 @@ async def create_prompt(
 # ---------- веб: архиватор диалогов ----------
 
 
-@app.get("/archive")
+@app.get("/archive", dependencies=[Depends(_feature_archive)])
 async def archive_list(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
@@ -575,7 +631,7 @@ async def archive_list(
     return templates.TemplateResponse(request, "archive.html", {"customer": customer, "archives": archives, "error": None})
 
 
-@app.post("/archive")
+@app.post("/archive", dependencies=[Depends(_feature_archive)])
 async def create_archive(
     request: Request,
     content: str = Form(...),
@@ -603,12 +659,12 @@ async def create_archive(
     return templates.TemplateResponse(request, "archive.html", {"customer": customer, "archives": archives, "error": note})
 
 
-@app.get("/verify")
+@app.get("/verify", dependencies=[Depends(_feature_archive)])
 async def verify_form(request: Request, customer: Customer | None = Depends(get_current_customer)):
     return templates.TemplateResponse(request, "verify.html", {"customer": customer, "result": None, "checked": False})
 
 
-@app.post("/verify")
+@app.post("/verify", dependencies=[Depends(_feature_archive)])
 async def verify_submit(
     request: Request,
     content: str = Form(...),
@@ -631,7 +687,7 @@ async def verify_submit(
 # ---------- веб: семейный тариф «Репетитор» ----------
 
 
-@app.get("/children/new")
+@app.get("/children/new", dependencies=[Depends(_feature_children)])
 async def new_child_form(request: Request, customer: Customer | None = Depends(get_current_customer)):
     if customer is None:
         return RedirectResponse("/login", status_code=303)
@@ -640,7 +696,7 @@ async def new_child_form(request: Request, customer: Customer | None = Depends(g
     return templates.TemplateResponse(request, "child_new.html", {"customer": customer, "error": None})
 
 
-@app.post("/children/new")
+@app.post("/children/new", dependencies=[Depends(_feature_children)])
 async def create_child(
     request: Request,
     email: str = Form(...),
@@ -672,7 +728,7 @@ async def create_child(
     return RedirectResponse("/", status_code=303)
 
 
-@app.get("/children/{child_id}")
+@app.get("/children/{child_id}", dependencies=[Depends(_feature_children)])
 async def view_child(
     child_id: int,
     request: Request,
@@ -1063,7 +1119,7 @@ async def admin_reset_password(
     )
 
 
-@app.get("/admin/orders")
+@app.get("/admin/orders", dependencies=[Depends(_feature_shop)])
 async def admin_orders(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
@@ -1083,7 +1139,7 @@ async def admin_orders(
     return templates.TemplateResponse(request, "admin_orders.html", {"customer": customer, "rows": rows})
 
 
-@app.post("/admin/orders/{order_id}/fulfill")
+@app.post("/admin/orders/{order_id}/fulfill", dependencies=[Depends(_feature_shop)])
 async def admin_fulfill_order(
     order_id: int,
     customer: Customer | None = Depends(get_current_customer),
@@ -1099,7 +1155,7 @@ async def admin_fulfill_order(
     return RedirectResponse("/admin/orders", status_code=303)
 
 
-@app.post("/admin/orders/{order_id}/refund")
+@app.post("/admin/orders/{order_id}/refund", dependencies=[Depends(_feature_shop)])
 async def admin_refund_order(
     order_id: int,
     customer: Customer | None = Depends(get_current_customer),
@@ -1734,7 +1790,11 @@ async def chat_completions(
 
     prompt = None
     if body.prompt_id is not None:
-        prompt = await session.get(Prompt, body.prompt_id)
+        # Раздел промптов выключен — значит и через API их не подставить,
+        # иначе выключение раздела закрывало бы только интерфейс.
+        prompt = (
+            await session.get(Prompt, body.prompt_id) if settings.enable_prompts else None
+        )
         if prompt is None or not prompt.active:
             raise HTTPException(
                 status_code=404,

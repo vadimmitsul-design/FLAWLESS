@@ -11,7 +11,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:5434:5432"
+      # Порт задаётся переменной, чтобы на одном хосте можно было поднять
+      # два экземпляра (внутренний и клиентский) с разными базами.
+      - "127.0.0.1:${DB_PORT:-5434}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U neurohub -d neurohub"]
       interval: 5s
@@ -21,12 +23,16 @@ services:
   neurohub:
     build: .
     restart: unless-stopped
-    env_file: .env
+    # Какой файл настроек уедет ВНУТРЬ контейнера. Флаг `--env-file` у
+    # docker compose подставляет переменные только в сам compose-файл и в
+    # контейнер ничего не передаёт — без этой переменной второй экземпляр
+    # молча поднимался бы с настройками первого.
+    env_file: ${ENV_FILE:-.env}
     environment:
       DATABASE_URL: postgresql+asyncpg://neurohub:${POSTGRES_PASSWORD:-neurohub}@db:5432/neurohub
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
-      - "8020:8000"
+      - "${APP_PORT:-8020}:8000"
     depends_on:
       db:
         condition: service_healthy

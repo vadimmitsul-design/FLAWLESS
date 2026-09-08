@@ -117,19 +117,20 @@
       <a href="/" class="logo" style="color:var(--text);">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="4" r="1.8"/><circle cx="19.5" cy="16" r="1.8"/><circle cx="4.5" cy="16" r="1.8"/><line x1="12" y1="9.4" x2="12" y2="5.8"/><line x1="14.2" y1="13.4" x2="18" y2="15.3"/><line x1="9.8" y1="13.4" x2="6" y2="15.3"/></svg>
         <span class="wordmark" style="font-size:19px;">Flawless</span>
+        {% if features.instance_name %}<span class="badge badge-role" style="margin-left:2px;">{{ features.instance_name }}</span>{% endif %}
       </a>
       <div style="display:flex;gap:28px;">
         <a href="/" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Кабинет</a>
         <a href="/chat" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Чат</a>
-        <a href="/shop" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Магазин</a>
-        <a href="/prompts" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Промпты</a>
-        <a href="/archive" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Архив</a>
+        {% if features.enable_shop %}<a href="/shop" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Магазин</a>{% endif %}
+        {% if features.enable_prompts %}<a href="/prompts" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Промпты</a>{% endif %}
+        {% if features.enable_archive %}<a href="/archive" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Архив</a>{% endif %}
         {% if customer.role == 'admin' %}
         <a href="/admin/overview" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Обзор</a>
         <a href="/admin/customers" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Люди</a>
         <a href="/admin/invites" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Приглашения</a>
         <a href="/admin/pricing" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Цены</a>
-        <a href="/admin/orders" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Заказы</a>
+        {% if features.enable_shop %}<a href="/admin/orders" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Заказы</a>{% endif %}
         <a href="/admin/topups" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Пополнения</a>
         <a href="/admin/password-resets" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Сброс паролей</a>
         <a href="/admin/api-keys" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">API-ключи</a>
