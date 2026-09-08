@@ -30,6 +30,7 @@ from app.models import (
     WalletLedger,
     utcnow,
 )
+from app import pricing as pricing_module
 from app.pricing import UsageAmounts, estimate_call_cost_usd
 
 _RUB_QUANT = Decimal("0.0001")
@@ -42,6 +43,21 @@ class SpendLimitExceeded(Exception):
         self.limit = limit
         self.spent = spent
         super().__init__(f"{scope} {period} spend limit exceeded: spent {spent} >= limit {limit}")
+
+
+class ModelNotPriced(Exception):
+    """Для модели нет действующей строки в model_prices на момент вызова.
+
+    Раньше такой вызов проходил и был БЕСПЛАТНЫМ: cost_usd=None ->
+    charged_rub=None -> баланс не уменьшался -> проверка «баланс > 0»
+    проходила бесконечно. Достаточно было добавить алиас в models.yaml и
+    забыть строку цены (или дать истечь valid_until), чтобы расход у
+    провайдера шёл, а с клиента не списывалось ничего."""
+
+    def __init__(self, provider: str, model: str):
+        self.provider = provider
+        self.model = model
+        super().__init__(f"no active price row for {provider}/{model}")
 
 
 class InsufficientBalance(Exception):
@@ -72,6 +88,23 @@ def _effective_limit(client_limit: Decimal | None, admin_limit: Decimal | None) 
     if admin_limit is None:
         return client_limit
     return min(client_limit, admin_limit)
+
+
+async def price_for_call(
+    session: AsyncSession, provider: str, model: str, at: datetime
+) -> ModelPrice:
+    """Цена для вызова, который СОБИРАЕМСЯ сделать. Нет действующей строки —
+    отказываемся ДО обращения к провайдеру: лучше явная ошибка «модель
+    недоступна», чем тихий бесплатный расход за наш счёт.
+
+    Резервный дефолт в estimate_reserve_rub (fallback_reserve_rub_when_unpriced)
+    при этом остаётся — он страхует пути, куда цена может не доехать иначе:
+    например, когда fallback-цепочка увела вызов на другую модель уже после
+    старта, и её строки цены нет."""
+    price = await pricing_module.find_price(session, provider, model, None, None, at)
+    if price is None:
+        raise ModelNotPriced(provider, model)
+    return price
 
 
 async def _spent_since(

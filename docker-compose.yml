@@ -1,6 +1,9 @@
 services:
   db:
     image: postgres:16-alpine
+    # Без политики перезапуска любое падение, нехватка памяти или
+    # перезагрузка хоста = простой до ручного вмешательства (аудит 2026-09-07).
+    restart: unless-stopped
     environment:
       POSTGRES_USER: neurohub
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-neurohub}
@@ -17,6 +20,7 @@ services:
 
   neurohub:
     build: .
+    restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://neurohub:${POSTGRES_PASSWORD:-neurohub}@db:5432/neurohub
@@ -26,6 +30,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # /healthz реально ходит в базу (SELECT 1), поэтому «зависший, но живой»
+    # процесс и потерянное соединение с БД видно снаружи, а не только по
+    # жалобам пользователей. start_period даёт время на миграции при старте.
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 volumes:
   pgdata:

@@ -128,8 +128,16 @@ def _require_admin(customer: Customer | None) -> RedirectResponse | None:
 
 
 @app.get("/healthz")
-async def healthz():
-    return {"status": "ok"}
+async def healthz(session: AsyncSession = Depends(get_session)):
+    """Проверка ДОХОДИТ ДО БАЗЫ. Раньше возвращала статичное «ok», не
+    заглядывая никуда: внешний монитор рапортовал «сервис жив», пока БД
+    лежала и ни один запрос не работал (аудит 2026-09-07)."""
+    try:
+        await session.execute(select(1))
+    except Exception as e:
+        logger.error("healthz: database unreachable: %r", e)
+        return JSONResponse({"status": "degraded", "database": "unreachable"}, status_code=503)
+    return {"status": "ok", "database": "ok"}
 
 
 # ---------- веб: регистрация / логин ----------
@@ -1705,6 +1713,9 @@ async def chat_completions(
         for k, v in body.model_dump(exclude={"model", "messages", "prompt_id"}).items()
         if k in _ALLOWED_EXTRA_PARAMS
     }
+    # Предел длины ответа зажимаем ДО расчёта резерва: обе величины читают
+    # один и тот же extra, поэтому оценка и факт сходятся по построению.
+    extra = pricing.clamp_output_tokens(extra)
 
     try:
         provider, model = llm.resolve_alias(body.model)
@@ -1764,7 +1775,19 @@ async def chat_completions(
             return _replay_idempotent_response(existing)
 
     pricing_cfg = await billing.get_pricing_config(session)
-    reserve_price = await pricing.find_price(session, provider, model, None, None, utcnow())
+    try:
+        reserve_price = await billing.price_for_call(session, provider, model, utcnow())
+    except billing.ModelNotPriced:
+        logger.error("no active price row for %s/%s — call refused", provider, model)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": {
+                    "message": f"model '{body.model}' is temporarily unavailable: no active price configured",
+                    "type": "model_not_priced",
+                }
+            },
+        )
     reserve_rub = billing.estimate_reserve_rub(
         reserve_price,
         messages,
@@ -2256,8 +2279,18 @@ async def web_chat_send(
 
     billing_customer_id = billing.resolve_billing_customer_id(customer)
     pricing_cfg = await billing.get_pricing_config(session)
-    reserve_price = await pricing.find_price(session, provider, model_name, None, None, utcnow())
-    reserve_rub = billing.estimate_reserve_rub(reserve_price, prepared_messages, {}, pricing_cfg)
+    try:
+        reserve_price = await billing.price_for_call(session, provider, model_name, utcnow())
+    except billing.ModelNotPriced:
+        logger.error("no active price row for %s/%s — web chat call refused", provider, model_name)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Модель «{model}» сейчас недоступна: не настроена цена. Сообщите администратору.",
+        )
+    call_extra = pricing.clamp_output_tokens({})
+    reserve_rub = billing.estimate_reserve_rub(
+        reserve_price, prepared_messages, call_extra, pricing_cfg
+    )
 
     try:
         event = await billing.start_call(
@@ -2273,7 +2306,9 @@ async def web_chat_send(
 
     started = time.monotonic()
     try:
-        _, resp_provider, resp_model, response = await llm.chat_completion_with_fallback(model, prepared_messages)
+        _, resp_provider, resp_model, response = await llm.chat_completion_with_fallback(
+            model, prepared_messages, **call_extra
+        )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)
         await billing.finalize_failure(session, event, error_code=type(e).__name__, latency_ms=latency_ms)

@@ -1,0 +1,34 @@
+# БЕЗ ЭТОГО ФАЙЛА `COPY . .` в Dockerfile запекал в слои образа:
+#   .env — настоящие ключи OpenAI/Gemini и живой токен Telegram-бота
+#          (остаются в слое НАВСЕГДА, даже если потом поменять файл),
+#   .git — всю историю репозитория,
+#   .venv — 182 МБ виндового окружения, бесполезного внутри контейнера.
+# Найдено аудитом 2026-09-07.
+
+.env
+.env.*
+!.env.example
+
+.git
+.gitignore
+.venv
+venv
+
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+tests
+*.db
+*.sqlite3
+backups
+*.sql.gz
+
+CLAUDE.md
+README.md
+.idea
+.vscode

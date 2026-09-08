@@ -139,6 +139,10 @@ async def _handle_update(update: dict) -> None:
         except chatcore.TooManyRequests:
             await send_message(chat_id, f"{prefix}Слишком часто — подождите немного и повторите.")
             return
+        except billing.ModelNotPriced:
+            logger.error("telegram: no active price row for the configured model")
+            await send_message(chat_id, f"{prefix}Модель временно недоступна — уже разбираемся.")
+            return
         except Exception as e:
             logger.warning("telegram chat turn failed: %r", e)
             await send_message(chat_id, f"{prefix}Провайдер сейчас недоступен, попробуйте ещё раз.")

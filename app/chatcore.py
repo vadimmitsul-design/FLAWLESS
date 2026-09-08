@@ -39,8 +39,14 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     # Реальный провайдер/модель, что фактически ответит, известен только
     # после fallback (llm.chat_completion_with_fallback) — цену для
     # ФАКТИЧЕСКОГО списания резолвим заново ниже, не переиспользуем эту.
-    estimate_price = await pricing.find_price(session, provider, model, None, None, utcnow())
-    reserve_rub = billing.estimate_reserve_rub(estimate_price, redacted_messages, {}, pricing_cfg)
+    # Нет действующей цены — отказываемся до вызова провайдера (иначе расход
+    # у него идёт, а с клиента не списывается ничего). Бросается наружу,
+    # telegram_bot показывает это человеку понятным текстом.
+    estimate_price = await billing.price_for_call(session, provider, model, utcnow())
+    call_extra = pricing.clamp_output_tokens({})
+    reserve_rub = billing.estimate_reserve_rub(
+        estimate_price, redacted_messages, call_extra, pricing_cfg
+    )
 
     event = await billing.start_call(
         session, customer_id, billing_customer_id, provider, model, estimated_reserve_rub=reserve_rub
@@ -51,7 +57,7 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     started = time.monotonic()
     try:
         used_alias, provider, model, response = await llm.chat_completion_with_fallback(
-            model_alias, redacted_messages
+            model_alias, redacted_messages, **call_extra
         )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)

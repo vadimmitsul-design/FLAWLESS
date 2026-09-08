@@ -126,6 +126,27 @@ def estimate_messages_tokens(messages: list[dict]) -> int:
     return _estimate_tokens_from_char_count(total_chars)
 
 
+def clamp_output_tokens(extra: dict) -> dict:
+    """Всегда отправляем провайдеру явный предел длины ответа, ограниченный
+    settings.max_output_tokens_cap.
+
+    Без этого резерв считался исходя из 4096 токенов ответа, но никто не
+    заставлял провайдера в них уложиться: ответ на 64к токенов списывался
+    целиком уже ПОСЛЕ факта, без проверки баланса, и уводил его в минус.
+    Клиентское значение не игнорируем, а зажимаем сверху — и тем же числом
+    считается резерв (estimate_output_tokens_hint читает этот же extra),
+    так что оценка и реальность сходятся по построению."""
+    cap = settings.max_output_tokens_cap
+    clamped = dict(extra)
+    for field in ("max_completion_tokens", "max_tokens"):
+        value = clamped.get(field)
+        if isinstance(value, int) and value > 0:
+            clamped[field] = min(value, cap)
+            return clamped
+    clamped["max_tokens"] = cap
+    return clamped
+
+
 def estimate_output_tokens_hint(extra: dict) -> int:
     """max_tokens/max_completion_tokens клиента, если задан и осмыслен —
     иначе консервативный дефолт (лучше зарезервировать с запасом и изредка

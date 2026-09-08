@@ -1,5 +1,8 @@
 .env
 *.db
+# Дампы базы (scripts/backup_db.sh) — там балансы и вся история клиентов
+backups/
+*.sql.gz
 __pycache__/
 *.pyc
 .pytest_cache/

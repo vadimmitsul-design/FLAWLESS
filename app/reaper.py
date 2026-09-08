@@ -16,7 +16,7 @@ from datetime import timedelta
 
 from sqlalchemy import select
 
-from app import billing
+from app import alerts, billing
 from app.config import settings
 from app.db import SessionLocal
 from app.models import UsageEvent, utcnow
@@ -43,12 +43,16 @@ async def reap_stale_pending_events(session) -> int:
 
 
 async def reaper_loop() -> None:
+    """Периодическое обслуживание: подмести зависшие резервы и проверить,
+    не нездоров ли сервис (app/alerts.py). Отдельную фоновую задачу под
+    проверки не заводим — цикл уже есть и крутится с нужной частотой."""
     while True:
         try:
             async with SessionLocal() as session:
                 count = await reap_stale_pending_events(session)
                 if count:
                     logger.warning("reaper: released %d stale pending usage_events (reservation leaks)", count)
+                await alerts.check_and_notify(session)
         except asyncio.CancelledError:
             raise
         except Exception:
