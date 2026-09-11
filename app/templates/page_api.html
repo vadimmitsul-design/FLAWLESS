@@ -1,0 +1,104 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2" style="align-items:start;">
+      <div class="u-reveal">
+        <h2 class="u-h2" style="font-size:28px;">Меняется одна строка</h2>
+        <p class="u-lead" style="font-size:16px;">
+          Формат запроса и ответа совпадает с OpenAI Chat Completions, поэтому официальные SDK
+          работают без переделок. В коде меняются адрес и ключ — остальное остаётся.
+        </p>
+        <div class="row" style="margin-top:24px;gap:12px;flex-wrap:wrap;">
+          <a href="/docs/chat-completions" class="u-btn u-btn-ghost u-btn-sm">Справочник метода</a>
+          <a href="/docs/migration" class="u-btn u-btn-ghost u-btn-sm">Миграция с OpenAI</a>
+        </div>
+      </div>
+      <div class="dx-code u-reveal" style="margin:0;">
+        <div class="dx-code-head"><span class="dx-code-label">Python</span></div>
+<pre> client = OpenAI(
+-    api_key=os.environ["OPENAI_API_KEY"],
++    api_key=os.environ["FLAWLESS_API_KEY"],
++    base_url="{{ features.api_base_url }}/v1",
+ )</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="sec-head u-reveal" style="max-width:62ch;margin-bottom:40px;">
+      <span class="u-kicker">Что умеет</span>
+      <h2 class="u-h2">Не обёртка, а полноценный шлюз</h2>
+    </div>
+    <div class="u-grid u-grid-3">
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Потоковые ответы</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          <code>stream: true</code> и Server-Sent Events, как в родном API.
+          Обрыв соединения обрабатывается корректно: списывается только сгенерированное.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Повтор без двойного списания</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Заголовок <code>Idempotency-Key</code> — повтор вернёт сохранённый ответ первого запроса
+          и не пойдёт к провайдеру. У OpenAI такого нет.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Справочник моделей</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          <code>GET /v1/models</code> в формате OpenAI. Готовые клиенты подхватывают
+          каталог сами — вводить имя модели руками не нужно.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Запасные модели</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Перегрузка или таймаут — запрос уходит на резервную модель вместо ошибки.
+          Счёт считается по фактическому исполнителю.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Лимиты на ключ</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          У каждого ключа свои дневной и месячный потолки внутри общего потолка аккаунта.
+          Ключ подрядчику выдаётся на ограниченную сумму.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Понятные ошибки</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Коды и типы в формате OpenAI, с суммой остатка при нехватке баланса и
+          с указанием, какой именно потолок исчерпан.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="sec-head u-reveal" style="max-width:62ch;margin-bottom:34px;">
+      <span class="u-kicker">Готовые клиенты</span>
+      <h2 class="u-h2">Работает с тем, чем вы уже пользуетесь</h2>
+    </div>
+    <div class="u-grid u-grid-3">
+      <a class="u-card u-card-lift u-reveal" href="/docs/integrations/cursor" style="text-decoration:none;">
+        <h3 style="font-size:18px;margin-bottom:8px;color:var(--text);">Cursor</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.6;margin:0;">Редактор кода: свой ключ и свой адрес в настройках моделей.</p>
+      </a>
+      <a class="u-card u-card-lift u-reveal" href="/docs/integrations/sdk" style="text-decoration:none;">
+        <h3 style="font-size:18px;margin-bottom:8px;color:var(--text);">SDK и клиенты</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.6;margin:0;">Официальные библиотеки OpenAI и список клиентов, которые подойдут.</p>
+      </a>
+      <a class="u-card u-card-lift u-reveal" href="/docs/integrations/openwebui" style="text-decoration:none;">
+        <h3 style="font-size:18px;margin-bottom:8px;color:var(--text);">OpenWebUI и LibreChat</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.6;margin:0;">Готовый интерфейс чата для команды на своём сервере.</p>
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}

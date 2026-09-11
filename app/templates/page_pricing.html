@@ -1,0 +1,81 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    {% include "_calculator.html" %}
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="sec-head u-reveal" style="max-width:62ch;margin-bottom:40px;">
+      <span class="u-kicker">Формула</span>
+      <h2 class="u-h2">Себестоимость провайдера плюс фиксированная наценка</h2>
+    </div>
+    <div class="u-grid u-grid-3">
+      <div class="u-card u-reveal">
+        <div class="u-num" style="font-size:38px;font-weight:600;color:var(--accent);">+{{ markup_percent }}%</div>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.6;margin:10px 0 0;">
+          Наценка сервиса. Одна и та же для всех моделей — не приходится гадать,
+          на чём мы зарабатываем больше.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <div class="u-num" style="font-size:38px;font-weight:600;">{{ usd_rub_rate }}&nbsp;₽</div>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.6;margin:10px 0 0;">
+          Курс доллара в расчёте. Провайдеры выставляют счёт в долларах,
+          вы платите рублями с баланса.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <div class="u-num" style="font-size:38px;font-weight:600;">0&nbsp;₽</div>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.6;margin:10px 0 0;">
+          Абонентская плата, плата за место в команде и комиссия за пополнение баланса.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2">
+      <div class="u-card u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Что входит без доплаты</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Потоковые ответы, запасные модели при сбое провайдера, дневные и месячные потолки
+          расхода, маскировка секретов, веб-чат, Telegram-бот, история вызовов с точностью
+          до токена и выгрузка в CSV.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Наценка не переписывает прошлое</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Наценка и курс копируются внутрь каждой записи о вызове в момент запроса.
+          Если завтра курс изменится, вчерашние списания останутся прежними —
+          история расходов всегда отражает условия, действовавшие тогда.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Оборвалась связь — платите за часть</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Если клиент закрыл соединение посреди потокового ответа, списывается только то,
+          что успело сгенерироваться. Остаток придержанной суммы возвращается на баланс.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Ошибка провайдера — бесплатно</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Если модель не ответила и запасная тоже, деньги не списываются вовсе.
+          Вызов закрывается со статусом ошибки, придержанная сумма возвращается.
+        </p>
+      </div>
+    </div>
+    <p class="muted u-reveal" style="margin-top:24px;">
+      Пополнение сейчас проходит по заявке: вы указываете сумму, переводите деньги,
+      администратор подтверждает поступление. Приём карт появится до открытия сервиса
+      для внешних клиентов.
+    </p>
+  </div>
+</section>
+{% endblock %}

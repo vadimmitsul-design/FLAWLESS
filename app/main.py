@@ -35,6 +35,7 @@ from app.models import (
     PricingConfig,
     Product,
     InviteCode,
+    ModelPrice,
     Prompt,
     SubscriptionOrder,
     TelegramLink,
@@ -370,6 +371,12 @@ _DOCS_PAGES = [
      "Ответ по мере генерации — и что при обрыве соединения происходит с деньгами."),
     ("API", "/docs/limits", "Ошибки и лимиты", "docs/limits.html",
      "Частота запросов, потолки расхода и полный список кодов ошибок."),
+    ("Интеграции", "/docs/integrations/sdk", "SDK и другие клиенты", "docs/int_sdk.html",
+     "Официальные библиотеки OpenAI, совместимые клиенты — и честный список того, что не подойдёт."),
+    ("Интеграции", "/docs/integrations/cursor", "Cursor", "docs/int_cursor.html",
+     "Подключение редактора Cursor к моделям через свой ключ и свой адрес."),
+    ("Интеграции", "/docs/integrations/openwebui", "OpenWebUI и LibreChat", "docs/int_openwebui.html",
+     "Готовый интерфейс чата для команды на своём сервере."),
     ("Оплата и контроль", "/docs/billing", "Баланс и списания", "docs/billing.html",
      "Как рубли на балансе превращаются в вызовы и что сохраняется по каждому из них."),
     ("Переход", "/docs/migration", "Миграция с OpenAI", "docs/migration.html",
@@ -377,6 +384,30 @@ _DOCS_PAGES = [
 ]
 
 _DOCS_INDEX = {page[1]: i for i, page in enumerate(_DOCS_PAGES)}
+
+
+def _build_docs_search_index() -> list[dict]:
+    """Индекс для поиска по документации.
+
+    Заголовки h2 вынимаются из самих шаблонов, а не перечисляются руками:
+    иначе каждый новый раздел пришлось бы дублировать ещё и в индексе, и
+    поиск тихо отставал бы от документации. Собирается один раз при старте —
+    шаблоны на ходу не меняются.
+    """
+    index: list[dict] = []
+    for group, path, title, template, lead in _DOCS_PAGES:
+        file = BASE_DIR / "templates" / template
+        headings: list[str] = []
+        if file.exists():
+            raw = file.read_text(encoding="utf-8")
+            headings = [
+                re.sub(r"<[^>]+>", "", h).strip()
+                for h in re.findall(r"<h2[^>]*>(.*?)</h2>", raw, flags=re.S)
+            ]
+        index.append(
+            {"path": path, "title": title, "group": group, "lead": lead, "headings": headings}
+        )
+    return index
 
 
 def _build_docs_nav() -> list[dict]:
@@ -391,11 +422,41 @@ def _build_docs_nav() -> list[dict]:
 
 
 DOCS_NAV = _build_docs_nav()
+DOCS_SEARCH_INDEX = _build_docs_search_index()
 
 
 def _fmt_rub(value: Decimal) -> str:
     """Разряды — неразрывным пробелом, чтобы цена не переносилась по строкам."""
     return f"{value:,.0f}".replace(",", "\u00a0")
+
+
+async def _model_rows(session: AsyncSession) -> list[tuple[str, str, str, ModelPrice | None]]:
+    """(алиас, провайдер, модель, действующая строка прайса) по всем моделям
+    из config/models.yaml. Единственное место, связывающее реестр моделей с
+    прайсом, — чтобы «что показываем» и «что вызывается» не разъезжались."""
+    now = utcnow()
+    rows: list[tuple[str, str, str, ModelPrice | None]] = []
+    for alias in llm.known_models():
+        provider, model = llm.resolve_alias(alias)
+        price = await pricing.find_price(session, provider, model, None, None, now)
+        rows.append((alias, provider, model, price))
+    return rows
+
+
+async def available_models(session: AsyncSession) -> list[str]:
+    """Модели, которые реально можно вызвать, — то есть с действующей ценой.
+
+    Без цены вызов отклоняется с 503 (billing.price_for_call), поэтому
+    предлагать такую модель в выборе — значит обещать заведомую ошибку.
+    Используется ВЕЗДЕ, где показывается список: кабинет, веб-чат,
+    /v1/models. Отфильтровать один список мало — в остальных модель
+    по-прежнему предлагалась бы и падала при отправке.
+    """
+    return [
+        alias
+        for alias, _provider, _model, price in await _model_rows(session)
+        if price is not None and price.price_per_1m_input_tokens is not None
+    ]
 
 
 async def _public_model_catalog(session: AsyncSession) -> tuple[list[dict], PricingConfig]:
@@ -406,11 +467,8 @@ async def _public_model_catalog(session: AsyncSession) -> tuple[list[dict], Pric
     а клиент узнавал бы настоящую цену только из истории вызовов.
     """
     cfg = await billing.get_pricing_config(session)
-    now = utcnow()
     catalog: list[dict] = []
-    for alias in llm.known_models():
-        provider, model = llm.resolve_alias(alias)
-        price = await pricing.find_price(session, provider, model, None, None, now)
+    for alias, provider, model, price in await _model_rows(session):
         priced = price is not None and price.price_per_1m_input_tokens is not None
         catalog.append(
             {
@@ -427,6 +485,15 @@ async def _public_model_catalog(session: AsyncSession) -> tuple[list[dict], Pric
                 )
                 if priced
                 else "",
+                # числом — для калькулятора на лендинге
+                "rub_in": float(billing.price_in_rub(price.price_per_1m_input_tokens, cfg))
+                if priced
+                else 0.0,
+                "rub_out": float(
+                    billing.price_in_rub(price.price_per_1m_output_tokens or Decimal(0), cfg)
+                )
+                if priced
+                else 0.0,
             }
         )
     return catalog, cfg
@@ -439,9 +506,28 @@ async def _public_page_context(session: AsyncSession) -> dict:
     страница врала бы клиенту в тот же день, когда админ поменяет прайс.
     """
     models, cfg = await _public_model_catalog(session)
+    priced = [m for m in models if m["priced"]]
+    # Числа для калькулятора и примера отчёта считаются из тех же цен, что и
+    # витрина: иначе «посчитайте сами» показывало бы одно, а счёт — другое.
+    calc_rows = [
+        {"alias": m["alias"], "vendor": m["vendor"], "rub_in": m["rub_in"], "rub_out": m["rub_out"]}
+        for m in priced
+    ]
+    sample_ledger = []
+    for m, (tin, tout) in zip(priced, ((1840, 620), (5210, 1480), (960, 310))):
+        rub = m["rub_in"] * tin / 1_000_000 + m["rub_out"] * tout / 1_000_000
+        sample_ledger.append(
+            {
+                "model": m["alias"],
+                "tokens": f"{tin + tout:,}".replace(",", " ") + " токенов",
+                "rub": f"{rub:,.2f}".replace(",", " ").replace(".", ","),
+            }
+        )
     return {
         "customer": None,
         "models": models,
+        "calc_rows": calc_rows,
+        "sample_ledger": sample_ledger,
         # normalize() убирает хвостовые нули (30.00 -> 30), а ":f" не даёт ему
         # свалиться в экспоненту: Decimal("30.00").normalize() это 3E+1.
         "markup_percent": f"{cfg.markup_percent.normalize():f}",
@@ -460,6 +546,7 @@ async def _render_doc(request: Request, path: str, session: AsyncSession):
     ctx.update(
         {
             "docs_nav": DOCS_NAV,
+            "docs_search": DOCS_SEARCH_INDEX,
             "active_path": path,
             "page_title": title,
             "page_group": group,
@@ -484,12 +571,90 @@ async def docs_index(request: Request, session: AsyncSession = Depends(get_sessi
     return await _render_doc(request, "/docs", session)
 
 
-@app.get("/docs/{slug}")
+# slug:path, а не slug: адреса интеграций вложенные (/docs/integrations/cursor).
+@app.get("/docs/{slug:path}")
 async def docs_page(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
     path = f"/docs/{slug}"
     if path not in _DOCS_INDEX:
         raise HTTPException(status_code=404)
     return await _render_doc(request, path, session)
+
+
+# (адрес, шаблон, заголовок, надзаголовок, H1, подзаголовок, пункт меню)
+_MARKETING_PAGES = [
+    ("/models", "page_models.html", "Модели", "Каталог",
+     "Три провайдера — один ключ и один баланс",
+     "Цены пересчитаны в рубли по действующей наценке и курсу. Тот же прайс, по которому "
+     "считается ваш счёт, — расхождения между витриной и списанием быть не может.", "models"),
+    ("/pricing", "page_pricing.html", "Цены", "Цены",
+     "Платите за токены, а не за место",
+     "Абонентской платы нет. Посчитайте заранее, во сколько обойдётся ваша нагрузка, "
+     "и сравните модели между собой.", "pricing"),
+    ("/product/api", "page_api.html", "API", "Продукт",
+     "OpenAI-совместимый API с рублёвым биллингом",
+     "Тот же формат запроса и ответа, что у OpenAI, — плюс резервные модели, потолки расхода "
+     "и защита от двойного списания.", "api"),
+    ("/product/chat", "page_chat.html", "Чат", "Продукт",
+     "Веб-чат и бот для тех, кому не нужен код",
+     "Те же модели и тот же баланс — через интерфейс в кабинете и через Telegram, "
+     "с теми же лимитами, что и в API.", "chat"),
+    ("/solutions/developers", "page_sol_developers.html", "Разработчикам", "Решения",
+     "Один ключ вместо трёх аккаунтов и валютной карты",
+     "Подключается за минуту к тому, чем вы уже пользуетесь, и показывает себестоимость "
+     "каждого вызова.", "solutions"),
+    ("/solutions/agencies", "page_sol_agencies.html", "Агентствам", "Решения",
+     "Себестоимость ИИ по каждому проекту",
+     "Отдельный ключ на клиента, потолок расхода на проект и выгрузка, которую можно "
+     "приложить к акту.", "solutions"),
+    ("/solutions/companies", "page_sol_companies.html", "Компаниям", "Решения",
+     "Доступ к моделям для всей команды — под контролем",
+     "Единый кошелёк компании, потолки на человека, мгновенный отзыв доступа "
+     "и вырезание секретов из запросов.", "solutions"),
+]
+
+_MARKETING_INDEX = {page[0]: page for page in _MARKETING_PAGES}
+
+
+async def _render_marketing(request: Request, path: str, session: AsyncSession):
+    _path, template, title, kicker, h1, lead, here = _MARKETING_INDEX[path]
+    ctx = await _public_page_context(session)
+    ctx.update(
+        {
+            "page_title": title,
+            "page_kicker": kicker,
+            "page_h1": h1,
+            "page_lead": lead,
+            "page_cta": True,
+            "here": here,
+        }
+    )
+    return templates.TemplateResponse(request, template, ctx)
+
+
+@app.get("/models")
+async def page_models(request: Request, session: AsyncSession = Depends(get_session)):
+    return await _render_marketing(request, "/models", session)
+
+
+@app.get("/pricing")
+async def page_pricing(request: Request, session: AsyncSession = Depends(get_session)):
+    return await _render_marketing(request, "/pricing", session)
+
+
+@app.get("/product/{slug}")
+async def page_product(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+    path = f"/product/{slug}"
+    if path not in _MARKETING_INDEX:
+        raise HTTPException(status_code=404)
+    return await _render_marketing(request, path, session)
+
+
+@app.get("/solutions/{slug}")
+async def page_solutions(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+    path = f"/solutions/{slug}"
+    if path not in _MARKETING_INDEX:
+        raise HTTPException(status_code=404)
+    return await _render_marketing(request, path, session)
 
 
 # ---------- веб: кабинет ----------
@@ -545,7 +710,7 @@ async def dashboard(
             "api_keys": api_keys,
             "events": events,
             "topups": my_topups,
-            "models": llm.known_models(),
+            "models": await available_models(session),
             "children": children,
             "telegram_enabled": bool(settings.telegram_bot_token),
             "telegram_linked": telegram_link is not None,
@@ -1898,6 +2063,70 @@ def _replay_idempotent_response(existing: UsageEvent):
     )
 
 
+def _model_object(alias: str, provider: str, price: ModelPrice) -> dict:
+    """Формат OpenAI. created берём из даты начала действия прайса — это
+    единственная осмысленная дата, которая у нас есть, и она стабильна
+    (часть клиентов сортирует список по ней)."""
+    return {
+        "id": alias,
+        "object": "model",
+        "created": int(price.valid_from.timestamp()),
+        "owned_by": provider,
+    }
+
+
+async def _catalog_objects(session: AsyncSession) -> list[dict]:
+    return [
+        _model_object(alias, provider, price)
+        for alias, provider, _model, price in await _model_rows(session)
+        if price is not None and price.price_per_1m_input_tokens is not None
+    ]
+
+
+@app.get("/v1/models")
+async def list_models(
+    auth: tuple[Customer, ApiKey] = Depends(get_customer_by_api_key),
+    session: AsyncSession = Depends(get_session),
+):
+    """Справочник моделей в формате OpenAI.
+
+    Нужен не для красоты: Cursor, OpenWebUI, LibreChat и прочие готовые
+    клиенты спрашивают список первым делом и без него либо не подключаются,
+    либо требуют вводить имя модели руками.
+
+    Отдаются только модели с действующей ценой — ровно те, что вызов
+    реально примет.
+    """
+    _customer, api_key = auth
+    if not ratelimit.check(ratelimit.catalog_bucket(api_key.id)):
+        raise HTTPException(
+            status_code=429,
+            detail={"error": {"message": "rate limit exceeded, slow down", "type": "rate_limit_error"}},
+        )
+    return {"object": "list", "data": await _catalog_objects(session)}
+
+
+@app.get("/v1/models/{model_id}")
+async def retrieve_model(
+    model_id: str,
+    auth: tuple[Customer, ApiKey] = Depends(get_customer_by_api_key),
+    session: AsyncSession = Depends(get_session),
+):
+    _customer, api_key = auth
+    if not ratelimit.check(ratelimit.catalog_bucket(api_key.id)):
+        raise HTTPException(
+            status_code=429,
+            detail={"error": {"message": "rate limit exceeded, slow down", "type": "rate_limit_error"}},
+        )
+    for obj in await _catalog_objects(session):
+        if obj["id"] == model_id:
+            return obj
+    raise HTTPException(
+        status_code=404,
+        detail={"error": {"message": f"unknown model '{model_id}'", "type": "invalid_request_error"}},
+    )
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(
     request: Request,
@@ -2348,7 +2577,7 @@ async def web_chat(
             "conversations": conversations,
             "active_conversation": None,
             "chat_messages": [],
-            "models": llm.known_models(),
+            "models": await available_models(session),
         },
     )
 
@@ -2391,7 +2620,7 @@ async def web_chat_conversation(
             "conversations": conversations,
             "active_conversation": conversation,
             "chat_messages": chat_messages,
-            "models": llm.known_models(),
+            "models": await available_models(session),
         },
     )
 

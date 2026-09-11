@@ -1,0 +1,49 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Официальные SDK OpenAI</h2>
+<p>
+  Совместимость означает ровно это: работают штатные библиотеки, менять нужно адрес и ключ.
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Python</span><button type="button" class="dx-copy">Копировать</button></div><pre>from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["FLAWLESS_API_KEY"],
+    base_url="{{ features.api_base_url }}/v1",
+)
+
+print(client.models.list())</pre></div><div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Node.js</span><button type="button" class="dx-copy">Копировать</button></div><pre>import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: process.env.FLAWLESS_API_KEY,
+  baseURL: "{{ features.api_base_url }}/v1",
+});
+
+const models = await client.models.list();</pre></div>
+
+<h2>Что подойдёт без доработок</h2>
+<p>
+  Любой клиент, который умеет указывать свой <code>base_url</code> для OpenAI: редакторы кода,
+  интерфейсы чата, фреймворки вроде LangChain и LlamaIndex, самописные скрипты.
+  Нужны только два метода — <code>/v1/chat/completions</code> и <code>/v1/models</code>, оба есть.
+</p>
+
+<h2>Чего пока нет — и почему</h2>
+<div class="dx-note warn">
+  <p>
+    <strong>Claude Code подключить нельзя.</strong> Он ждёт API в формате Anthropic
+    (<code>/v1/messages</code>), а наш шлюз говорит на формате OpenAI. Это не настройка:
+    нужен отдельный метод, переводящий один формат в другой. Мы не добавляем его в список
+    поддерживаемых, пока он действительно не заработает.
+  </p>
+  <p>
+    По той же причине не заработают клиенты, завязанные на <code>/v1/embeddings</code>,
+    генерацию изображений или загрузку файлов, — этих методов в сервисе нет.
+  </p>
+</div>
+
+<h2>Как проверить подключение</h2>
+<p>
+  Сделайте один запрос и загляните в историю вызовов в кабинете: там должны появиться модель,
+  число токенов и сумма списания. Если запись есть — клиент подключён правильно.
+</p>
+{% endblock %}

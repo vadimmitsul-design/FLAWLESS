@@ -1,0 +1,78 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-3">
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Было: три аккаунта</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Отдельная регистрация у OpenAI, Anthropic и Google, у каждого свой биллинг,
+          свой формат счёта и свой способ оплаты.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Было: валютная карта</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Оплата в долларах, поиск работающей карты, комиссии за конвертацию
+          и регулярные отказы платежей.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Стало: один ключ</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Один баланс в рублях, один адрес, один ключ на все модели.
+          Меняется <code>base_url</code> — остальной код остаётся.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="sec-head u-reveal" style="max-width:62ch;margin-bottom:40px;">
+      <span class="u-kicker">В работе</span>
+      <h2 class="u-h2">Что это даёт в повседневной разработке</h2>
+    </div>
+    <div class="u-grid u-grid-2">
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Сравнить модели без трёх интеграций</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Один и тот же запрос уходит любой модели — меняется только строка <code>model</code>.
+          Параметры, которые конкретная модель не поддерживает, молча отбрасываются,
+          поэтому код не приходится ветвить.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Ключ на эксперимент</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Отдельный ключ с собственным дневным потолком: пробный скрипт в цикле
+          не съест весь баланс, а отозвать его можно одной кнопкой.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Повторы без страха</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          <code>Idempotency-Key</code> делает повторную отправку безопасной:
+          сеть оборвалась — повторяете с тем же ключом и не платите дважды.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Видно себестоимость</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          По каждому вызову сохранены токены и сумма. Можно честно ответить,
+          сколько стоит фича, а не гадать по общему счёту в конце месяца.
+        </p>
+      </div>
+    </div>
+    <div class="u-reveal" style="margin-top:34px;">
+      <div class="integr" style="display:flex;gap:12px;flex-wrap:wrap;">
+        <a href="/docs/integrations/cursor" class="u-btn u-btn-ghost u-btn-sm">Cursor</a>
+        <a href="/docs/integrations/sdk" class="u-btn u-btn-ghost u-btn-sm">OpenAI SDK</a>
+        <a href="/docs/integrations/openwebui" class="u-btn u-btn-ghost u-btn-sm">OpenWebUI</a>
+        <a href="/docs/migration" class="u-btn u-btn-ghost u-btn-sm">Миграция с OpenAI</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -22,6 +22,13 @@ def api_key_bucket(api_key_id: int) -> str:
     return f"key:{api_key_id}"
 
 
+def catalog_bucket(api_key_id: int) -> str:
+    """Отдельный счётчик для /v1/models. Клиенты вроде OpenWebUI дёргают
+    справочник при каждом открытии страницы — на общей корзине он съедал бы
+    квоту, отведённую на платные вызовы."""
+    return f"catalog:{api_key_id}"
+
+
 def customer_bucket(customer_id: int) -> str:
     return f"customer:{customer_id}"
 

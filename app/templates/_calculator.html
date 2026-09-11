@@ -1,0 +1,73 @@
+    <div class="calc u-reveal">
+      <div class="calc-in">
+        <div class="calc-field">
+          <label for="calc-model">Модель</label>
+          <select id="calc-model">
+            {% for r in calc_rows %}<option value="{{ loop.index0 }}">{{ r.alias }} — {{ r.vendor }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="calc-field">
+          <label for="calc-in">Входящие токены <output id="calc-in-val">12 000</output></label>
+          <input type="range" id="calc-in" min="0" max="1000" step="1" value="330" data-min="500" data-max="2000000">
+        </div>
+        <div class="calc-field">
+          <label for="calc-out">Исходящие токены <output id="calc-out-val">4 000</output></label>
+          <input type="range" id="calc-out" min="0" max="1000" step="1" value="330" data-min="200" data-max="500000">
+        </div>
+        <div class="calc-field">
+          <label for="calc-n">Вызовов в месяц <output id="calc-n-val">1 000</output></label>
+          <input type="range" id="calc-n" min="0" max="1000" step="1" value="500" data-min="1" data-max="200000">
+        </div>
+      </div>
+      <div class="calc-out">
+        <span class="u-kicker" style="color:var(--accent-2);">В месяц</span>
+        <div class="calc-total" id="calc-total">—</div>
+        <div class="calc-split">
+          <span>ввод: <b id="calc-part-in">—</b></span>
+          <span>вывод: <b id="calc-part-out">—</b></span>
+        </div>
+        <p class="calc-note" style="margin-top:14px;">
+          Абонентской платы нет: не сделали вызовов — не заплатили.
+          Комиссия за пополнение баланса не берётся.
+        </p>
+      </div>
+    </div>
+
+<script id="calc-data" type="application/json">{{ calc_rows|tojson }}</script>
+<script>
+(function(){
+  // ── калькулятор ──────────────────────────────────────────────────────
+  var data = JSON.parse(document.getElementById('calc-data').textContent || '[]');
+  var $ = function(id){ return document.getElementById(id); };
+  var nf = new Intl.NumberFormat('ru-RU');
+  var money = new Intl.NumberFormat('ru-RU', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+  // Ползунок линейный, а величина — логарифмическая: диапазон от тысячи
+  // токенов до двух миллионов на линейной шкале превращает первые 90%
+  // хода в мёртвую зону, и ручка у левого края выглядит несработавшей.
+  function scaled(el){
+    var lo = Math.log(+el.dataset.min), hi = Math.log(+el.dataset.max);
+    var v = Math.exp(lo + (hi - lo) * (+el.value / +el.max));
+    var step = v > 100000 ? 10000 : v > 10000 ? 1000 : v > 1000 ? 100 : 10;
+    return Math.max(+el.dataset.min, Math.round(v / step) * step);
+  }
+
+  function recalc(){
+    if (!data.length) return;
+    var row = data[+$('calc-model').value] || data[0];
+    var ti = scaled($('calc-in')), to = scaled($('calc-out')), n = scaled($('calc-n'));
+    $('calc-in-val').textContent = nf.format(ti);
+    $('calc-out-val').textContent = nf.format(to);
+    $('calc-n-val').textContent = nf.format(n);
+    var pin = row.rub_in * ti / 1e6 * n;
+    var pout = row.rub_out * to / 1e6 * n;
+    $('calc-total').textContent = money.format(pin + pout) + ' ₽';
+    $('calc-part-in').textContent = money.format(pin) + ' ₽';
+    $('calc-part-out').textContent = money.format(pout) + ' ₽';
+  }
+  ['calc-model','calc-in','calc-out','calc-n'].forEach(function(id){
+    var el = $(id); if (el) el.addEventListener('input', recalc);
+  });
+  recalc();
+})();
+</script>

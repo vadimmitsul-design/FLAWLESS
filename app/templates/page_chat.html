@@ -1,0 +1,74 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2">
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Те же модели и тот же баланс</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Чат вызывает те же модели через тот же биллинг, что и API. Отдельной подписки нет:
+          списывается с общего кошелька, по тем же ценам, и попадает в ту же историю вызовов.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Лимиты действуют и здесь</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Дневной и месячный потолок расхода одинаково работает в API, в чате и в Telegram.
+          Перейти в чат, чтобы обойти ограничение, не получится.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">История диалогов</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Переписка сохраняется в кабинете: можно вернуться к прошлому разговору
+          и продолжить его, а не начинать заново.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:19px;margin-bottom:10px;">Выбор модели на лету</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          В списке только модели с действующей ценой — то есть те, которые действительно
+          ответят. Можно взять дешёвую для черновика и дорогую для сложной задачи.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2" style="align-items:center;">
+      <div class="u-reveal">
+        <span class="u-kicker">Telegram</span>
+        <h2 class="u-h2" style="font-size:28px;">Бот, который списывает с того же кошелька</h2>
+        <p class="u-lead" style="font-size:16px;">
+          Бот привязывается к аккаунту одноразовым кодом из кабинета. Дальше он отвечает
+          в Telegram, а расход идёт с общего баланса — с теми же потолками и той же
+          маскировкой секретов, что и в API.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:10px;">Кому это удобно</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Тем в команде, кому нужен доступ к моделям, но не нужен код: менеджерам,
+          редакторам, поддержке. Администратор видит их расход в общем отчёте
+          наравне с разработчиками.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-card u-reveal" style="border-left:3px solid var(--brand);">
+      <h3 style="font-size:19px;margin-bottom:10px;">Чего в чате пока нет</h3>
+      <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+        Загрузки документов для анализа, веб-поиска и генерации изображений — этого в сервисе
+        нет ни в чате, ни в API. Мы пишем об этом прямо, чтобы вы не планировали работу
+        вокруг функции, которой не существует.
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

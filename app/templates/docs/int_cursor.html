@@ -1,0 +1,49 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Что нужно</h2>
+<ul>
+  <li>API-ключ Flawless;</li>
+  <li>положительный баланс;</li>
+  <li>Cursor любой свежей версии.</li>
+</ul>
+
+<h2>Настройка</h2>
+<ol>
+  <li>Откройте <strong>Settings → Models</strong>.</li>
+  <li>Включите <strong>OpenAI API Key</strong> и вставьте ключ <code>nh_&hellip;</code>.</li>
+  <li>Разверните <strong>Override OpenAI Base URL</strong> и укажите адрес:</li>
+</ol>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Base URL</span><button type="button" class="dx-copy">Копировать</button></div><pre>{{ features.api_base_url }}/v1</pre></div>
+<ol start="4">
+  <li>В списке моделей добавьте свою модель с именем-алиасом — например <code>{{ default_model }}</code>.
+      Имена моделей OpenAI (<code>gpt-4o</code> и подобные) у нас не принимаются.</li>
+  <li>Нажмите <strong>Verify</strong>. Cursor сделает пробный запрос и запишет его в вашу историю вызовов.</li>
+</ol>
+
+<div class="dx-note">
+  <p>
+    Список доступных моделей Cursor забирает методом <code>GET /v1/models</code> — в нём
+    только модели с действующей ценой, то есть те, которые действительно ответят.
+  </p>
+</div>
+
+<h2>Если проверка не проходит</h2>
+<div class="dx-table-wrap">
+<table>
+  <thead><tr><th>Что видно</th><th>Причина</th><th>Что сделать</th></tr></thead>
+  <tbody>
+    <tr><td>401</td><td>Ключ скопирован не целиком или отозван</td><td>Выпустить новый ключ в кабинете</td></tr>
+    <tr><td>404 unknown model</td><td>Указано имя модели OpenAI вместо нашего алиаса</td><td>Вписать алиас из <a href="/docs/models">каталога</a></td></tr>
+    <tr><td>402</td><td>Нулевой баланс</td><td>Пополнить кошелёк</td></tr>
+    <tr><td>429</td><td>Исчерпан потолок расхода или частота</td><td>Проверить лимиты ключа в кабинете</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Чего ожидать</h2>
+<p>
+  Обычный чат и автодополнение по коду работают через наш адрес. Часть возможностей Cursor
+  ходит в собственные сервисы редактора и через сторонний адрес не пойдёт — это ограничение
+  самого Cursor, а не шлюза.
+</p>
+{% endblock %}

@@ -1,0 +1,79 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-3">
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Сотрудники платят сами</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Каждый заводит свою подписку, платит личной картой и приносит чек.
+          Компания не видит ни общей суммы, ни того, кто чем пользуется.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Доступ не отзывается</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Человек уходит — аккаунт у провайдера остаётся его,
+          вместе с перепиской и данными, которые он туда отправлял.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Секреты уезжают наружу</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Ключи и токены попадают в запрос вместе с куском кода,
+          и никакого контроля над этим нет.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="sec-head u-reveal" style="max-width:62ch;margin-bottom:40px;">
+      <span class="u-kicker">Как устроено у нас</span>
+      <h2 class="u-h2">Один кошелёк компании и видимый расход</h2>
+    </div>
+    <div class="u-grid u-grid-2">
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Сотрудников заводит администратор</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Регистрация по одноразовому коду приглашения — с улицы аккаунт не завести.
+          Отключение действует немедленно и сразу на все ключи человека.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Бюджет выдаёт компания</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Администратор начисляет сотруднику сумму и ставит дневной и месячный потолок.
+          Каждое движение денег записано с указанием, кто его провёл и на каком основании.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Отчёт по людям</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Кто сколько потратил за месяц, с разбивкой по моделям и по дням,
+          с итогом по компании и выгрузкой в CSV.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Секреты не уходят провайдеру</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Ключи, токены и другие чувствительные строки вырезаются из запроса
+          до отправки — одинаково в API, в чате и в Telegram.
+        </p>
+      </div>
+    </div>
+
+    <div class="u-card u-reveal" style="margin-top:24px;border-left:3px solid var(--brand);">
+      <h3 style="font-size:18px;margin-bottom:9px;">Честно о том, чего пока нет</h3>
+      <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+        Отделов с общим бюджетом и ролей вроде «руководитель отдела» ещё нет: бюджет и потолки
+        ставятся на человека. Входа через корпоративный аккаунт компании тоже нет —
+        сотрудники заводятся приглашениями. Обе вещи в планах, и мы не станем говорить,
+        что они уже работают.
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title }} — Flawless{% endblock %}
+{% block content %}
+{% include "_public_nav.html" %}
+
+<section class="u-pagehead">
+  <div class="u-wrap">
+    <span class="u-kicker">{{ page_kicker }}</span>
+    <h1>{{ page_h1 }}</h1>
+    {% if page_lead %}<p>{{ page_lead }}</p>{% endif %}
+    {% if page_cta %}
+    <div class="row" style="gap:14px;margin-top:32px;flex-wrap:wrap;">
+      <a href="/signup" class="u-btn u-btn-primary">Получить API-ключ</a>
+      <a href="/docs" class="u-btn u-btn-ghost">Документация</a>
+    </div>
+    {% endif %}
+  </div>
+</section>
+
+{% block page %}{% endblock %}
+
+<section class="u-sec u-band" style="text-align:center;">
+  <div class="u-narrow">
+    <h2 class="u-h2" style="margin:0;">Подключение занимает меньше минуты</h2>
+    <p class="u-lead" style="margin:16px auto 0;max-width:50ch;">
+      Регистрация, ключ и первый запрос — в одном окне.
+    </p>
+    <div class="row" style="justify-content:center;gap:14px;margin-top:30px;flex-wrap:wrap;">
+      <a href="/signup" class="u-btn u-btn-onband">Создать аккаунт</a>
+      <a href="/docs" class="u-btn u-btn-onband-ghost">Читать документацию</a>
+    </div>
+  </div>
+</section>
+
+{% include "_public_footer.html" %}
+{% endblock %}

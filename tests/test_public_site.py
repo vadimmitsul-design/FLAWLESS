@@ -29,10 +29,14 @@ def test_landing_is_public_and_has_no_placeholders(client):
 
 
 def test_landing_shows_real_markup_and_rate(client):
-    """Наценка 30% и курс 95 ₽ приходят из pricing_config (см. conftest)."""
-    html = client.get("/").text
-    assert "+30%" in html
-    assert "95&nbsp;₽" in html
+    """Наценка 30% и курс 95 ₽ приходят из pricing_config (см. conftest).
+    На лендинге они стоят в тексте у калькулятора, на /pricing — цифрами."""
+    # В шаблоне фраза перенесена по строкам — сравниваем по схлопнутым пробелам.
+    landing = " ".join(client.get("/").text.split())
+    assert "наценке 30% и курсу 95 ₽" in landing
+    pricing = client.get("/pricing").text
+    assert "+30%" in pricing
+    assert "95&nbsp;₽" in pricing
 
 
 def test_landing_lists_model_with_ruble_price(client):

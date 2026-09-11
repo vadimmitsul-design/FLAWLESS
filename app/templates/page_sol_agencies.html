@@ -1,0 +1,65 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2" style="align-items:center;">
+      <div class="u-reveal">
+        <span class="u-rule"></span>
+        <h2 class="u-h2" style="font-size:28px;margin-top:18px;">Главный вопрос агентства: сколько ИИ стоил в этом проекте</h2>
+        <p class="u-lead" style="font-size:16px;">
+          Когда все работают с одного аккаунта провайдера, ответа нет: в счёте одна сумма на всех.
+          Разложить её по клиентам и проектам постфактум невозможно.
+        </p>
+      </div>
+      <div class="u-card u-reveal">
+        <h3 style="font-size:18px;margin-bottom:10px;">Как это решается сейчас</h3>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0 0 12px;">
+          Отдельный ключ на проект или на клиента. У каждого ключа своё имя, свой дневной
+          и месячный потолок, своя история вызовов и своя строка в отчёте.
+        </p>
+        <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+          Проект закончился — ключ отзывается одной кнопкой, и расход по нему остаётся в истории.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-3">
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Потолок на клиента</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          Согласовали с заказчиком бюджет на ИИ — ставите его лимитом на ключ.
+          Перерасхода, о котором вы узнаете из счёта, не будет.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Выгрузка для счёта</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          История вызовов выгружается в CSV и открывается в русском Excel:
+          модель, токены, сумма, дата. Приложить к акту — готовое обоснование.
+        </p>
+      </div>
+      <div class="u-card u-card-lift u-reveal">
+        <h3 style="font-size:18px;margin-bottom:9px;">Маржа видна сразу</h3>
+        <p style="color:var(--text-dim);font-size:14.5px;line-height:1.62;margin:0;">
+          В каждой записи лежит и себестоимость, и итоговая сумма.
+          Видно не только сколько потратили, но и сколько это стоило на самом деле.
+        </p>
+      </div>
+    </div>
+
+    <div class="u-card u-reveal" style="margin-top:24px;border-left:3px solid var(--brand);">
+      <h3 style="font-size:18px;margin-bottom:9px;">Честно о том, чего пока нет</h3>
+      <p style="color:var(--text-dim);font-size:15px;line-height:1.65;margin:0;">
+        Тега проекта прямо в запросе пока нет — разделение идёт через отдельные ключи.
+        Это работает, но требует завести ключ на каждый проект заранее. Общий бюджет
+        отдела с несколькими сотрудниками внутри тоже ещё не сделан: потолки ставятся
+        на человека и на ключ.
+      </p>
+    </div>
+  </div>
+</section>
+{% endblock %}

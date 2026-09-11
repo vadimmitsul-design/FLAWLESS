@@ -47,6 +47,11 @@
     --code-bg:oklch(23% 0.020 245);
     --code-text:oklch(93% 0.008 245);
     --code-border:oklch(31% 0.020 245);
+    --band:oklch(21% 0.038 247);
+    --band-2:oklch(26% 0.042 247);
+    --band-text:oklch(97% 0.006 245);
+    --band-dim:oklch(76% 0.018 245);
+    --band-line:oklch(33% 0.030 247);
   }
   :root[data-theme="dark"]{
     --bg:oklch(17% 0.016 245);
@@ -73,6 +78,11 @@
     --code-bg:oklch(14% 0.014 245);
     --code-text:oklch(90% 0.010 245);
     --code-border:oklch(28% 0.018 245);
+    --band:oklch(15% 0.026 247);
+    --band-2:oklch(20% 0.030 247);
+    --band-text:oklch(97% 0.006 245);
+    --band-dim:oklch(76% 0.018 245);
+    --band-line:oklch(29% 0.024 247);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
@@ -121,6 +131,135 @@
   .logo svg{width:22px;height:22px;stroke:var(--brand);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
   .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:900;font-style:italic;letter-spacing:-0.02em;color:var(--brand);}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent-hi);flex-shrink:0;}
+
+  /* ─────────── общий слой компонентов публичных страниц ───────────
+     Живёт здесь, а не в каждом шаблоне: лендинг, страницы продукта и
+     решений обязаны выглядеть одним сайтом, а не тремя похожими. */
+
+  .u-wrap{max-width:1200px;margin:0 auto;padding:0 32px;}
+  .u-narrow{max-width:1000px;margin:0 auto;padding:0 32px;}
+
+  /* Наклон — из самого логотипа (жирный курсив). Фирменный мотив:
+     диагональные разделители и подчёркивания, а не случайный градиент. */
+  .u-slant{display:inline-block;transform:skewX(-9deg);}
+  .u-rule{display:block;width:52px;height:4px;border-radius:2px;background:var(--brand);
+    transform:skewX(-20deg);}
+
+  .u-kicker{display:block;font-size:12.5px;font-weight:800;letter-spacing:0.11em;
+    text-transform:uppercase;color:var(--accent);}
+  .u-h2{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+    font-size:clamp(28px,3.6vw,40px);line-height:1.1;letter-spacing:-0.022em;margin:14px 0 0;}
+  .u-lead{font-size:17.5px;line-height:1.62;color:var(--text-dim);margin:16px 0 0;max-width:60ch;}
+
+  .u-btn{height:50px;padding:0 26px;display:inline-flex;align-items:center;justify-content:center;
+    gap:9px;border-radius:12px;font-weight:700;font-size:15.5px;white-space:nowrap;
+    transition:transform .16s ease, box-shadow .16s ease, background .16s ease;}
+  .u-btn-primary{background:var(--accent);color:var(--btn-on-accent);
+    box-shadow:0 10px 24px -12px var(--accent);}
+  .u-btn-primary:hover{background:var(--accent-hi);color:var(--btn-on-accent);
+    transform:translateY(-1px);box-shadow:0 16px 30px -14px var(--accent);}
+  .u-btn-ghost{background:var(--surface);color:var(--text);border:1px solid var(--border);}
+  .u-btn-ghost:hover{border-color:var(--brand);color:var(--accent);transform:translateY(-1px);}
+  .u-btn-onband{background:var(--band-text);color:var(--band);}
+  .u-btn-onband:hover{color:var(--band);transform:translateY(-1px);}
+  .u-btn-onband-ghost{background:transparent;color:var(--band-text);border:1px solid var(--band-line);}
+  .u-btn-onband-ghost:hover{color:var(--band-text);border-color:var(--band-text);transform:translateY(-1px);}
+  .u-btn-sm{height:40px;padding:0 18px;font-size:14.5px;border-radius:10px;}
+
+  .u-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:28px;
+    transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;}
+  .u-card-lift:hover{transform:translateY(-3px);border-color:color-mix(in oklab, var(--brand) 45%, var(--border));
+    box-shadow:0 22px 44px -28px var(--shadow-soft);}
+
+  .u-band{background:var(--band);color:var(--band-text);}
+  .u-band h1,.u-band h2,.u-band h3{color:var(--band-text);}
+  .u-band .u-lead{color:var(--band-dim);}
+  .u-band .u-kicker{color:var(--accent-2);}
+
+  .u-grid{display:grid;gap:20px;}
+  .u-grid-3{grid-template-columns:repeat(auto-fit,minmax(272px,1fr));}
+  .u-grid-2{grid-template-columns:repeat(auto-fit,minmax(404px,1fr));}
+
+  .u-num{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
+    letter-spacing:-0.02em;}
+
+  .sec-head{max-width:64ch;margin-bottom:46px;}
+
+  .dx-code{background:var(--code-bg);border:1px solid var(--code-border);border-radius:12px;overflow:hidden;margin:20px 0 0;}
+  .dx-code-head{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;
+    border-bottom:1px solid var(--code-border);}
+  .dx-code-label{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;letter-spacing:0.06em;
+    text-transform:uppercase;color:color-mix(in oklab, var(--code-text) 55%, transparent);}
+  .dx-code pre{margin:0;padding:18px;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13px;
+    line-height:1.72;color:var(--code-text);overflow-x:auto;}
+  .dx-copy{appearance:none;border:1px solid var(--code-border);background:transparent;width:auto;height:26px;
+    padding:0 10px;border-radius:6px;font-size:11.5px;font-weight:600;cursor:pointer;
+    color:color-mix(in oklab, var(--code-text) 70%, transparent);font-family:'Manrope';}
+  .dx-copy:hover{color:var(--code-text);}
+  .dx-copy[aria-pressed="true"]{background:color-mix(in oklab, var(--code-text) 12%, transparent);
+    color:var(--code-text);border-color:transparent;}
+
+  /* ─── калькулятор ─── */
+  .calc{display:grid;grid-template-columns:1.15fr 0.85fr;gap:0;border:1px solid var(--border);
+    border-radius:20px;overflow:hidden;background:var(--surface);}
+  @media (max-width:880px){.calc{grid-template-columns:1fr;}}
+  .calc-in{padding:32px;}
+  .calc-out{padding:32px;background:var(--band);color:var(--band-text);display:flex;
+    flex-direction:column;justify-content:center;gap:8px;}
+  .calc-field + .calc-field{margin-top:26px;}
+  .calc-field label{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+    font-size:14px;font-weight:600;color:var(--text-dim);margin:0 0 10px;}
+  .calc-field output{font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:600;
+    color:var(--text);font-variant-numeric:tabular-nums;}
+  .calc select{height:46px;}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;padding:0;border:none;
+    border-radius:99px;background:var(--surface-hi);outline:none;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;
+    background:var(--accent);border:3px solid var(--surface);box-shadow:0 2px 8px -2px var(--shadow-soft);
+    cursor:pointer;}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border-radius:50%;background:var(--accent);
+    border:3px solid var(--surface);cursor:pointer;}
+  .calc-total{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:clamp(34px,5vw,48px);
+    font-weight:600;letter-spacing:-0.03em;font-variant-numeric:tabular-nums;line-height:1;}
+  .calc-note{font-size:13.5px;color:var(--band-dim);line-height:1.6;}
+  .calc-split{display:flex;gap:20px;flex-wrap:wrap;margin-top:6px;font-size:13px;color:var(--band-dim);
+    font-family:'JetBrains Mono',ui-monospace,monospace;}
+
+  /* шапка и подвал публичных страниц */
+  .u-head{position:sticky;top:0;z-index:40;background:color-mix(in oklab, var(--bg) 82%, transparent);
+    backdrop-filter:blur(14px);border-bottom:1px solid var(--border);}
+  .u-head .u-wrap{height:74px;display:flex;align-items:center;justify-content:space-between;gap:24px;}
+  .u-nav{display:flex;gap:28px;}
+  .u-nav a{font-size:15px;font-weight:600;color:var(--text-dim);}
+  .u-nav a:hover{color:var(--text);}
+  .u-nav a.is-here{color:var(--accent);}
+  @media (max-width:1040px){.u-nav{display:none;}}
+
+  .u-foot{border-top:1px solid var(--border);background:var(--bg-2);}
+  .u-foot-cols{display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:36px;padding:58px 0 40px;}
+  @media (max-width:860px){.u-foot-cols{grid-template-columns:1fr 1fr;}}
+  .u-foot-cols h4{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;
+    color:var(--text-faint);margin-bottom:15px;}
+  .u-foot-cols a{display:block;font-size:14.5px;color:var(--text-dim);margin-bottom:11px;}
+  .u-foot-cols a:hover{color:var(--accent);}
+  .u-foot-legal{border-top:1px solid var(--border);padding:22px 0 44px;display:flex;
+    justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--text-faint);}
+
+  /* герой внутренних страниц */
+  .u-pagehead{padding:74px 0 58px;border-bottom:1px solid var(--border);background:var(--bg-2);}
+  .u-pagehead h1{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+    font-size:clamp(32px,4.6vw,50px);line-height:1.06;letter-spacing:-0.028em;margin:14px 0 0;
+    text-wrap:balance;max-width:19ch;}
+  .u-pagehead p{font-size:19px;line-height:1.6;color:var(--text-dim);margin:20px 0 0;max-width:58ch;}
+  .u-sec{padding:80px 0;}
+
+  /* Появление — из видимого состояния, а не из opacity:0: если скрипт не
+     отработал, текст обязан остаться на странице. */
+  @media (prefers-reduced-motion:no-preference){
+    .js-reveal .u-reveal{opacity:0;transform:translateY(14px);}
+    .js-reveal .u-reveal.is-in{opacity:1;transform:none;
+      transition:opacity .5s cubic-bezier(.22,.61,.36,1), transform .5s cubic-bezier(.22,.61,.36,1);}
+  }
   .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
 </style>
 {% block head %}{% endblock %}
@@ -180,6 +319,42 @@ function toggleTheme(){
   applyThemeIcon();
 }
 applyThemeIcon();
+
+// Появление блоков при скролле. Класс js-reveal ставится скриптом: без JS
+// правило не применяется вовсе и текст виден сразу — страница не должна
+// зависеть от того, отработал ли наблюдатель.
+(function(){
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var items = document.querySelectorAll('.u-reveal');
+  if (reduce || !items.length || !('IntersectionObserver' in window)) return;
+  document.documentElement.classList.add('js-reveal');
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (!e.isIntersecting) return;
+      e.target.classList.add('is-in');
+      io.unobserve(e.target);
+    });
+  }, {rootMargin: '0px 0px -8% 0px', threshold: 0.06});
+  items.forEach(function(el, i){
+    el.style.transitionDelay = Math.min(i % 6, 5) * 55 + 'ms';
+    io.observe(el);
+  });
+  // Первый экран показываем сразу, не дожидаясь наблюдателя.
+  setTimeout(function(){
+    items.forEach(function(el){
+      if (el.getBoundingClientRect().top < window.innerHeight) el.classList.add('is-in');
+    });
+  }, 30);
+
+  // Страховка: содержимое НИКОГДА не остаётся спрятанным. Если наблюдатель
+  // не отработал, страницу снимает превью или её печатают целиком — через
+  // секунду всё становится видимым без анимации. Контент, который видно
+  // только после скролла, — это потерянный контент.
+  setTimeout(function(){
+    document.documentElement.classList.remove('js-reveal');
+    items.forEach(function(el){ el.classList.add('is-in'); });
+  }, 1100);
+})();
 </script>
 </body>
 </html>

@@ -1,0 +1,76 @@
+{% extends "page_base.html" %}
+{% block page %}
+<section class="u-sec">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-3">
+      {% for m in models %}
+      <div class="u-card u-card-lift u-reveal" style="display:flex;flex-direction:column;gap:16px;">
+        <div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:600;color:var(--accent);">{{ m.alias }}</div>
+          <div style="font-size:11.5px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;color:var(--text-faint);margin-top:6px;">{{ m.vendor }}</div>
+        </div>
+        <p style="font-size:14.5px;line-height:1.6;color:var(--text-dim);margin:0;flex:1;">{{ m.blurb }}</p>
+        <div style="font-size:13px;color:var(--text-faint);font-family:'JetBrains Mono',monospace;">{{ m.model }}</div>
+        {% if m.priced %}
+        <div style="padding-top:16px;border-top:1px solid var(--border);">
+          <div style="display:flex;gap:9px;align-items:baseline;">
+            <b class="u-num" style="font-size:23px;">{{ m.price_in }}&nbsp;₽</b>
+            <span style="color:var(--text-faint);">/</span>
+            <b class="u-num" style="font-size:23px;">{{ m.price_out }}&nbsp;₽</b>
+          </div>
+          <div style="font-size:12.5px;color:var(--text-faint);margin-top:5px;">за 1M токенов: ввод / вывод</div>
+        </div>
+        {% else %}
+        <div style="padding-top:16px;border-top:1px solid var(--border);font-size:13px;color:var(--text-faint);">
+          Цена не настроена — модель недоступна для вызова.
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="u-sec" style="background:var(--bg-2);border-top:1px solid var(--border);border-bottom:1px solid var(--border);">
+  <div class="u-wrap">
+    <div class="u-grid u-grid-2">
+      <div class="u-reveal">
+        <span class="u-rule"></span>
+        <h2 class="u-h2" style="font-size:26px;margin-top:18px;">Алиас вместо имени провайдера</h2>
+        <p class="u-lead" style="font-size:16px;">
+          В запросе указывается короткий алиас — <code>{{ default_model }}</code>, а не длинный
+          идентификатор модели у провайдера. Провайдер выпустит новую версию — алиас останется
+          прежним, и ваш код не придётся трогать.
+        </p>
+      </div>
+      <div class="u-reveal">
+        <span class="u-rule"></span>
+        <h2 class="u-h2" style="font-size:26px;margin-top:18px;">Запасные модели</h2>
+        <p class="u-lead" style="font-size:16px;">
+          У каждого алиаса есть цепочка замен. Перегрузка, таймаут или 5xx у провайдера —
+          запрос уходит на запасную модель. Ошибки конфигурации замену не запускают:
+          повторять их бессмысленно. Списание считается по той модели, которая реально ответила.
+        </p>
+      </div>
+      <div class="u-reveal">
+        <span class="u-rule"></span>
+        <h2 class="u-h2" style="font-size:26px;margin-top:18px;">Модель без цены не вызывается</h2>
+        <p class="u-lead" style="font-size:16px;">
+          Если для модели нет действующей строки прайса, вызов отклоняется с кодом 503
+          ещё до обращения к провайдеру. Это защита: без цены сервис не смог бы посчитать списание,
+          и вызов оказался бы бесплатным за наш счёт.
+        </p>
+      </div>
+      <div class="u-reveal">
+        <span class="u-rule"></span>
+        <h2 class="u-h2" style="font-size:26px;margin-top:18px;">Справочник в API</h2>
+        <p class="u-lead" style="font-size:16px;">
+          Список моделей отдаётся методом <code>GET /v1/models</code> в формате OpenAI —
+          готовые клиенты вроде Cursor и OpenWebUI подхватывают каталог сами.
+          В нём только модели с действующей ценой.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

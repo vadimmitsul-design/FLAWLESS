@@ -1,0 +1,52 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>OpenWebUI</h2>
+<p>
+  Готовый интерфейс чата, который ставится на свой сервер. Подключается как обычный
+  OpenAI-совместимый провайдер.
+</p>
+<ol>
+  <li>Откройте <strong>Settings → Connections → OpenAI API</strong>.</li>
+  <li>В поле адреса укажите <code>{{ features.api_base_url }}/v1</code>.</li>
+  <li>В поле ключа вставьте <code>nh_&hellip;</code>.</li>
+  <li>Сохраните — список моделей подтянется сам.</li>
+</ol>
+
+<h2>Запуск в докере</h2>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Terminal</span><button type="button" class="dx-copy">Копировать</button></div><pre>docker run -d -p 3000:8080 \
+  -e OPENAI_API_BASE_URL="{{ features.api_base_url }}/v1" \
+  -e OPENAI_API_KEY="$FLAWLESS_API_KEY" \
+  -v open-webui:/app/backend/data \
+  --name open-webui ghcr.io/open-webui/open-webui:main</pre></div>
+
+<h2>LibreChat</h2>
+<p>
+  Настраивается через <code>librechat.yaml</code> как пользовательский провайдер:
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">librechat.yaml</span><button type="button" class="dx-copy">Копировать</button></div><pre>endpoints:
+  custom:
+    - name: "Flawless"
+      apiKey: "${FLAWLESS_API_KEY}"
+      baseURL: "{{ features.api_base_url }}/v1"
+      models:
+        default: ["{{ default_model }}"]
+        fetch: true
+      titleConvo: true
+      modelDisplayLabel: "Flawless"</pre></div>
+
+<div class="dx-note">
+  <p>
+    <code>fetch: true</code> заставит LibreChat запросить каталог через <code>/v1/models</code>.
+    Если предпочитаете фиксированный список — перечислите алиасы вручную и поставьте
+    <code>fetch: false</code>.
+  </p>
+</div>
+
+<h2>Общее для обоих</h2>
+<ul>
+  <li>Расход идёт с общего баланса и попадает в историю вызовов наравне с API.</li>
+  <li>Потолки расхода на ключ действуют и здесь — выдайте интерфейсу отдельный ключ с лимитом.</li>
+  <li>Оба интерфейса опрашивают каталог моделей часто; для него выделен отдельный счётчик частоты,
+      поэтому он не съедает квоту платных вызовов.</li>
+</ul>
+{% endblock %}
