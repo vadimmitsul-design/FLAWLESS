@@ -14,7 +14,7 @@
   } catch (e) {}
 })();
 </script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@0,700;0,800;0,900;1,800;1,900&display=swap">
 <style>
   /* Фирменные цвета сняты с логотипа: #3E8CB8 — мягкий стальной синий с
      уходом в циан, а не насыщенный королевский.
@@ -88,7 +88,11 @@
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
   a{color:var(--accent-hi);text-decoration:none;}
   a:hover{color:var(--accent);}
-  h1,h2,h3{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;margin:0;letter-spacing:-0.01em;}
+  /* Заголовки — тем же шрифтом, что и вордмарк в логотипе (Nunito,
+     тяжёлые начертания). Раньше стоял Space Grotesk: технично, но с
+     логотипом не имел ничего общего. */
+  h1,h2,h3{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;
+    margin:0;letter-spacing:-0.018em;}
   .mono{font-family:'JetBrains Mono',ui-monospace,monospace;}
   .wrap{max-width:1080px;margin:0 auto;padding:0 32px;}
   .muted{color:var(--text-faint);font-size:0.9rem;}
@@ -147,7 +151,7 @@
 
   .u-kicker{display:block;font-size:12.5px;font-weight:800;letter-spacing:0.11em;
     text-transform:uppercase;color:var(--accent);}
-  .u-h2{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+  .u-h2{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:700;
     font-size:clamp(28px,3.6vw,40px);line-height:1.1;letter-spacing:-0.022em;margin:14px 0 0;}
   .u-lead{font-size:17.5px;line-height:1.62;color:var(--text-dim);margin:16px 0 0;max-width:60ch;}
 
@@ -179,6 +183,9 @@
   .u-grid{display:grid;gap:20px;}
   .u-grid-3{grid-template-columns:repeat(auto-fit,minmax(272px,1fr));}
   .u-grid-2{grid-template-columns:repeat(auto-fit,minmax(404px,1fr));}
+  /* Каталог моделей: карточки узкие, чтобы четыре помещались в ряд и
+     последняя не оставалась сиротой во второй строке. */
+  .u-grid-models{grid-template-columns:repeat(auto-fit,minmax(236px,1fr));}
 
   .u-num{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;
     letter-spacing:-0.02em;}
@@ -247,7 +254,7 @@
 
   /* герой внутренних страниц */
   .u-pagehead{padding:74px 0 58px;border-bottom:1px solid var(--border);background:var(--bg-2);}
-  .u-pagehead h1{font-family:'Space Grotesk',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+  .u-pagehead h1{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:700;
     font-size:clamp(32px,4.6vw,50px);line-height:1.06;letter-spacing:-0.028em;margin:14px 0 0;
     text-wrap:balance;max-width:19ch;}
   .u-pagehead p{font-size:19px;line-height:1.6;color:var(--text-dim);margin:20px 0 0;max-width:58ch;}
@@ -271,7 +278,6 @@
   <div class="wrap" style="height:68px;display:flex;align-items:center;justify-content:space-between;">
     <div style="display:flex;align-items:center;gap:40px;">
       <a href="/" class="logo" style="color:var(--text);">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="12" cy="4" r="1.8"/><circle cx="19.5" cy="16" r="1.8"/><circle cx="4.5" cy="16" r="1.8"/><line x1="12" y1="9.4" x2="12" y2="5.8"/><line x1="14.2" y1="13.4" x2="18" y2="15.3"/><line x1="9.8" y1="13.4" x2="6" y2="15.3"/></svg>
         <span class="wordmark" style="font-size:19px;">Flawless</span>
         {% if features.instance_name %}<span class="badge badge-role" style="margin-left:2px;">{{ features.instance_name }}</span>{% endif %}
       </a>

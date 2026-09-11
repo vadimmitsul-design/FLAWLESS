@@ -1,35 +1,53 @@
-# Реестр моделей, доступных клиентам напрямую (клиент шлёт этот alias как
-# "model" в /v1/chat/completions — в отличие от AI-HUB/gateway, тут клиент
-# выбирает модель сам). Добавление модели = новая запись здесь + строка
-# прайса в model_prices (scripts/seed_prices.py), код не трогаем.
+# Реестр моделей, доступных клиентам. Клиент шлёт alias как "model" в
+# /v1/chat/completions — это публичный контракт, он не меняется, даже если
+# под ним сменится версия модели у провайдера.
 #
-# model_info.fallback — список алиасов, которые пробуются по очереди, если
-# основная модель ответила ошибкой уровня провайдера (rate limit/timeout/5xx).
-# model_info — стандартное место LiteLLM для произвольных метаданных, сам
-# Router их не использует, но и не ругается на них. Подбор пар ниже — дефолт
-# для старта, поправить под реальную экономику.
+# ЗАКУПКА ИДЁТ ЧЕРЕЗ OPENROUTER (решение заказчика от 2026-09-11).
+# Один договор и один ключ вместо трёх, доступ к сотням моделей, добавление
+# новой модели = запись здесь + строка цены. Прямые ключи провайдеров
+# по-прежнему работают (litellm-префиксы openai/, anthropic/, gemini/) —
+# при желании часть моделей можно возить напрямую, если так дешевле.
 #
-# ВНИМАНИЕ: точные litellm-идентификаторы моделей ниже не проверены боевым
-# вызовом (см. CLAUDE.md) — сверить перед продом, как и в gateway/.
+# provider/model для прайса получаются разрезанием строки по ПЕРВОЙ косой
+# черте: "openrouter/anthropic/claude-sonnet-4-6" -> provider "openrouter",
+# model "anthropic/claude-sonnet-4-6".
+#
+# model_info.fallback — алиасы, которые пробуются по очереди, если основная
+# модель ответила ошибкой уровня провайдера (rate limit / timeout / 5xx).
+#
+# Идентификаторы и цены ниже СВЕРЕНЫ с каталогом OpenRouter 2026-09-11
+# скриптом scripts/sync_openrouter_prices.py. До сверки здесь стоял
+# несуществующий anthropic/claude-sonnet-4-6 (на деле версия пишется через
+# точку), а прайс gemini был занижен в десять раз — то есть каждый вызов
+# уходил бы в убыток. Повторять сверку после любой правки этого файла:
+#   docker compose exec neurohub python scripts/sync_openrouter_prices.py --check
 
 model_list:
   - model_name: gpt-5-mini
     litellm_params:
-      model: openai/gpt-5-mini
-      api_key: os.environ/OPENAI_API_KEY
+      model: openrouter/openai/gpt-5-mini
+      api_key: os.environ/OPENROUTER_API_KEY
     model_info:
       fallback: [gemini-flash]
 
   - model_name: claude-sonnet
     litellm_params:
-      model: anthropic/claude-sonnet-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
+      model: openrouter/anthropic/claude-sonnet-5
+      api_key: os.environ/OPENROUTER_API_KEY
     model_info:
       fallback: [gpt-5-mini]
 
   - model_name: gemini-flash
     litellm_params:
-      model: gemini/gemini-3.5-flash
-      api_key: os.environ/GEMINI_API_KEY
+      model: openrouter/google/gemini-3.5-flash
+      api_key: os.environ/OPENROUTER_API_KEY
+    model_info:
+      fallback: [gpt-5-mini]
+
+  # Самая дешёвая в каталоге — для массовых и черновых задач.
+  - model_name: gemini-flash-lite
+    litellm_params:
+      model: openrouter/google/gemini-3.1-flash-lite
+      api_key: os.environ/OPENROUTER_API_KEY
     model_info:
       fallback: [gpt-5-mini]

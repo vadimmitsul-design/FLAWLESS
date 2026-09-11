@@ -58,7 +58,7 @@ def test_chat_page_requires_login(client):
 
 def test_send_creates_conversation_and_charges_balance(client, monkeypatch):
     async def _fake_call(alias, messages, **kwargs):
-        return alias, "openai", "gpt-5-mini", _FakeResponse("у меня всё хорошо")
+        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("у меня всё хорошо")
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 
@@ -88,7 +88,7 @@ def test_conversation_history_sent_to_provider_on_followup(client, monkeypatch):
 
     async def _fake_call(alias, messages, **kwargs):
         captured.append([dict(m) for m in messages])
-        return alias, "openai", "gpt-5-mini", _FakeResponse("ответ " + str(len(captured)))
+        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("ответ " + str(len(captured)))
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 
@@ -162,7 +162,7 @@ def test_empty_message_without_file_rejected(client):
 
 def test_cannot_view_someone_elses_conversation(client, monkeypatch):
     async def _fake_call(alias, messages, **kwargs):
-        return alias, "openai", "gpt-5-mini", _FakeResponse("ok")
+        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("ok")
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 
@@ -186,7 +186,7 @@ def test_text_file_attachment_appended_to_message(client, monkeypatch):
 
     async def _fake_call(alias, messages, **kwargs):
         captured.append([dict(m) for m in messages])
-        return alias, "openai", "gpt-5-mini", _FakeResponse("получил файл")
+        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("получил файл")
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 
@@ -210,7 +210,7 @@ def test_image_attachment_sent_as_vision_content(client, monkeypatch):
 
     async def _fake_call(alias, messages, **kwargs):
         captured.append([dict(m) for m in messages])
-        return alias, "openai", "gpt-5-mini", _FakeResponse("вижу картинку")
+        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("вижу картинку")
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 

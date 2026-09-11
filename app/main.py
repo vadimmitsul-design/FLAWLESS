@@ -82,6 +82,10 @@ class _FeatureFlags:
         return settings.public_base_url
 
     @property
+    def enable_public_site(self) -> bool:
+        return settings.enable_public_site
+
+    @property
     def enable_shop(self) -> bool:
         return settings.enable_shop
 
@@ -175,6 +179,10 @@ def _require_feature(enabled: bool) -> None:
 
 # Вешаются на сами маршруты через dependencies=[...], а не проверяются внутри
 # тела функции: так про них нельзя забыть, дописывая обработчик.
+def _feature_public_site() -> None:
+    _require_feature(settings.enable_public_site)
+
+
 def _feature_shop() -> None:
     _require_feature(settings.enable_shop)
 
@@ -349,12 +357,36 @@ async def forgot_password_submit(
 
 # ---------- публичные страницы: лендинг и документация ----------
 
-_VENDOR_TITLES = {"openai": "OpenAI", "anthropic": "Anthropic", "gemini": "Google"}
+_VENDOR_TITLES = {
+    "openai": "OpenAI",
+    "anthropic": "Anthropic",
+    "gemini": "Google",
+    "google": "Google",
+    "meta-llama": "Meta",
+    "mistralai": "Mistral",
+    "deepseek": "DeepSeek",
+    "qwen": "Qwen",
+    "x-ai": "xAI",
+    "openrouter": "OpenRouter",
+}
+
+
+def _vendor_title(provider: str, model: str) -> str:
+    """Кто сделал модель — для витрины.
+
+    При закупке через OpenRouter провайдер у всех моделей один, а
+    производитель зашит в идентификатор: anthropic/claude-sonnet-4-6.
+    Показывать клиенту «OpenRouter» вместо «Anthropic» бессмысленно —
+    он выбирает модель, а не поставщика трафика.
+    """
+    vendor = model.split("/", 1)[0] if provider == "openrouter" and "/" in model else provider
+    return _VENDOR_TITLES.get(vendor, vendor)
 
 _MODEL_BLURBS = {
     "gpt-5-mini": "Быстрые и недорогие ответы для основной массы запросов.",
     "claude-sonnet": "Длинный контекст и задачи, где важна точность рассуждения.",
-    "gemini-flash": "Низкая задержка и самая низкая цена за миллион токенов.",
+    "gemini-flash": "Низкая задержка, сильна в работе с большими документами.",
+    "gemini-flash-lite": "Самая дешёвая в каталоге — для массовых и черновых задач.",
 }
 
 # (группа, адрес, заголовок, шаблон, подзаголовок)
@@ -474,7 +506,7 @@ async def _public_model_catalog(session: AsyncSession) -> tuple[list[dict], Pric
             {
                 "alias": alias,
                 "model": model,
-                "vendor": _VENDOR_TITLES.get(provider, provider),
+                "vendor": _vendor_title(provider, model),
                 "blurb": _MODEL_BLURBS.get(alias, "Доступна через тот же ключ и тот же баланс."),
                 "priced": priced,
                 "price_in": _fmt_rub(billing.price_in_rub(price.price_per_1m_input_tokens, cfg))
@@ -631,17 +663,17 @@ async def _render_marketing(request: Request, path: str, session: AsyncSession):
     return templates.TemplateResponse(request, template, ctx)
 
 
-@app.get("/models")
+@app.get("/models", dependencies=[Depends(_feature_public_site)])
 async def page_models(request: Request, session: AsyncSession = Depends(get_session)):
     return await _render_marketing(request, "/models", session)
 
 
-@app.get("/pricing")
+@app.get("/pricing", dependencies=[Depends(_feature_public_site)])
 async def page_pricing(request: Request, session: AsyncSession = Depends(get_session)):
     return await _render_marketing(request, "/pricing", session)
 
 
-@app.get("/product/{slug}")
+@app.get("/product/{slug}", dependencies=[Depends(_feature_public_site)])
 async def page_product(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
     path = f"/product/{slug}"
     if path not in _MARKETING_INDEX:
@@ -649,7 +681,7 @@ async def page_product(slug: str, request: Request, session: AsyncSession = Depe
     return await _render_marketing(request, path, session)
 
 
-@app.get("/solutions/{slug}")
+@app.get("/solutions/{slug}", dependencies=[Depends(_feature_public_site)])
 async def page_solutions(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
     path = f"/solutions/{slug}"
     if path not in _MARKETING_INDEX:
@@ -667,6 +699,10 @@ async def dashboard(
     session: AsyncSession = Depends(get_session),
 ):
     if customer is None:
+        # Внутренний контур витрины не имеет: сотруднику нечего продавать,
+        # ему нужен вход. Лендинг там был бы просто мусором на главной.
+        if not settings.enable_public_site:
+            return RedirectResponse("/login", status_code=303)
         return templates.TemplateResponse(
             request, "landing.html", await _public_page_context(session)
         )
@@ -2063,6 +2099,11 @@ def _replay_idempotent_response(existing: UsageEvent):
     )
 
 
+def _vendor_owner(provider: str, model: str) -> str:
+    """owned_by в формате OpenAI: машинное имя производителя, не витринное."""
+    return model.split("/", 1)[0] if provider == "openrouter" and "/" in model else provider
+
+
 def _model_object(alias: str, provider: str, price: ModelPrice) -> dict:
     """Формат OpenAI. created берём из даты начала действия прайса — это
     единственная осмысленная дата, которая у нас есть, и она стабильна
@@ -2077,8 +2118,8 @@ def _model_object(alias: str, provider: str, price: ModelPrice) -> dict:
 
 async def _catalog_objects(session: AsyncSession) -> list[dict]:
     return [
-        _model_object(alias, provider, price)
-        for alias, provider, _model, price in await _model_rows(session)
+        _model_object(alias, _vendor_owner(provider, model), price)
+        for alias, provider, model, price in await _model_rows(session)
         if price is not None and price.price_per_1m_input_tokens is not None
     ]
 

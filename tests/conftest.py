@@ -87,8 +87,11 @@ def _seed_prices(_database):
         async with SessionLocal() as session:
             session.add(
                 ModelPrice(
-                    provider="openai",
-                    model="gpt-5-mini",
+                    # Закупка идёт через OpenRouter, поэтому пара для прайса —
+                    # ("openrouter", "openai/gpt-5-mini"), а не ("openai", ...).
+                    # Алиас в запросе клиента при этом прежний: gpt-5-mini.
+                    provider="openrouter",
+                    model="openai/gpt-5-mini",
                     price_per_1m_input_tokens=Decimal("0.25"),
                     price_per_1m_output_tokens=Decimal("1.00"),
                     valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),

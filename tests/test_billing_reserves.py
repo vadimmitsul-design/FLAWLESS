@@ -154,7 +154,7 @@ async def _fake_stream_then_break(alias, messages, **kwargs):
         }
         raise RuntimeError("simulated connection drop")
 
-    return alias, "openai", "gpt-5-mini", gen()
+    return alias, "openrouter", "openai/gpt-5-mini", gen()
 
 
 def test_interrupted_stream_charges_for_delivered_partial_content(client, monkeypatch):
@@ -293,7 +293,7 @@ def test_real_disconnect_via_aclose_still_charges_and_releases_reservation(clien
             yield {"id": "chatcmpl-test", "choices": [{"delta": {"content": "Hello there, a longer partial reply"}}]}
             yield {"id": "chatcmpl-test", "choices": [{"delta": {"content": " that never finishes"}}]}
 
-        return alias, "openai", "gpt-5-mini", gen()
+        return alias, "openrouter", "openai/gpt-5-mini", gen()
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_stream)
 

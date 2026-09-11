@@ -171,3 +171,59 @@ def test_search_is_available_on_every_docs_page(client):
     assert 'id="dx-open-search"' in html
     assert 'id="dx-index"' in html
     assert "Ctrl K" in html
+
+
+# ---------- два контура ----------
+
+
+def test_internal_instance_has_no_public_site(client, monkeypatch):
+    """Внутреннему контуру витрина не нужна: сотруднику нечего продавать.
+    Выключённая витрина обязана отдавать 404, а не просто прятать ссылки —
+    иначе выключение косметическое."""
+    monkeypatch.setattr(settings, "enable_public_site", False)
+    for path in ("/models", "/pricing", "/product/api", "/solutions/agencies"):
+        assert client.get(path).status_code == 404, f"{path} доступен на внутреннем контуре"
+
+
+def test_internal_instance_sends_anonymous_visitor_to_login(client, monkeypatch):
+    monkeypatch.setattr(settings, "enable_public_site", False)
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
+
+
+def test_docs_stay_available_without_the_public_site(client, monkeypatch):
+    """Документация нужна и своим разработчикам — её флаг витрины не трогает."""
+    monkeypatch.setattr(settings, "enable_public_site", False)
+    assert client.get("/docs").status_code == 200
+    assert client.get("/docs/chat-completions").status_code == 200
+
+
+# ---------- закупка через OpenRouter ----------
+
+
+def test_vendor_is_the_model_maker_not_the_reseller(client):
+    """Через OpenRouter поставщик у всех моделей один. Клиент выбирает
+    модель, а не канал закупки, поэтому на витрине должен стоять
+    производитель — OpenAI, а не OpenRouter."""
+    html = client.get("/models").text
+    assert "OpenAI" in html
+    assert "OPENROUTER" not in html.upper().replace("OPENROUTER_API_KEY", "")
+
+
+def test_models_endpoint_reports_the_maker_in_owned_by(client):
+    _signup(client, "mdl_owner@test.local")
+    key = _api_key(client)
+    data = client.get("/v1/models", headers={"Authorization": f"Bearer {key}"}).json()["data"]
+    row = next(m for m in data if m["id"] == "gpt-5-mini")
+    assert row["owned_by"] == "openai", "owned_by должен называть производителя модели"
+
+
+def test_alias_is_stable_while_the_route_changes(client):
+    """Клиент шлёт алиас, а не идентификатор провайдера: переезд закупки на
+    OpenRouter не должен ломать чужой код."""
+    from app import llm
+
+    provider, model = llm.resolve_alias("gpt-5-mini")
+    assert provider == "openrouter"
+    assert model == "openai/gpt-5-mini"

@@ -3,9 +3,10 @@
 Запуск: docker compose exec neurohub python scripts/seed_prices.py
 Повторный запуск безопасен — существующие строки не трогает.
 
-ВНИМАНИЕ: цены ниже ориентировочные (не сверены со счетами провайдеров) —
-как и в AI-HUB/gateway, перед продом сверить и при расхождении закрыть
-строку (valid_until) и завести новую, задним числом не редактировать.
+Цены сверены с каталогом OpenRouter 2026-09-11. Держать их в актуальном
+состоянии должен scripts/sync_openrouter_prices.py, а не ручная правка:
+он закрывает устаревшую строку (valid_until) и заводит новую, не трогая
+историю вызовов.
 markup_percent/usd_rub_rate — тоже ориентировочные, править через
 /admin (когда появится) или напрямую в pricing_config.
 """
@@ -25,11 +26,14 @@ from app.models import ModelPrice, PricingConfig
 
 PRICES_VALID_FROM = datetime(2026, 9, 1, tzinfo=timezone.utc)
 
-# provider, model, in_per_1m, out_per_1m (USD, себестоимость без наценки)
+# provider, model, in_per_1m, out_per_1m (USD, себестоимость без наценки).
+# СВЕРЕНО с каталогом OpenRouter 2026-09-11 скриптом sync_openrouter_prices.py.
+# Не править на глаз: цены у провайдеров меняются, для этого есть скрипт.
 PRICE_ROWS = [
-    ("openai", "gpt-5-mini", "0.25", "1.00"),
-    ("anthropic", "claude-sonnet-4-6", "3.00", "15.00"),
-    ("gemini", "gemini-3.5-flash", "0.15", "0.60"),
+    ("openrouter", "openai/gpt-5-mini", "0.25", "2.00"),
+    ("openrouter", "anthropic/claude-sonnet-5", "2.00", "10.00"),
+    ("openrouter", "google/gemini-3.5-flash", "1.50", "9.00"),
+    ("openrouter", "google/gemini-3.1-flash-lite", "0.25", "1.50"),
 ]
 
 DEFAULT_MARKUP_PERCENT = Decimal("30.00")
