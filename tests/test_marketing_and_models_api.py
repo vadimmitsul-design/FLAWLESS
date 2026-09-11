@@ -227,3 +227,34 @@ def test_alias_is_stable_while_the_route_changes(client):
     provider, model = llm.resolve_alias("gpt-5-mini")
     assert provider == "openrouter"
     assert model == "openai/gpt-5-mini"
+
+
+# ---------- шапка кабинета ----------
+
+
+def _admin_client():
+    from fastapi.testclient import TestClient
+    from app.main import app
+
+    admin = TestClient(app)
+    r = admin.post("/login", data={"email": "admin@test.local", "password": "AdminPass123"})
+    assert r.status_code in (200, 303)
+    return admin
+
+
+def test_admin_sections_live_in_one_menu_not_in_the_main_row(client):
+    """Было тринадцать ссылок в один ряд: у админа строка переполнялась и
+    ломалась на две. Администраторские разделы обязаны жить в выпадающем
+    меню, иначе шапка снова расползётся при добавлении раздела."""
+    html = _admin_client().get("/").text
+    row = html.split('<nav class="cab-links">')[1].split("</nav>")[0]
+    for path in ("/admin/overview", "/admin/customers", "/admin/pricing", "/admin/api-keys"):
+        assert path not in row, f"{path} стоит в общем ряду ссылок вместо меню"
+        assert f'href="{path}"' in html, f"{path} пропал из шапки совсем"
+    assert '<summary>Админка</summary>' in html
+
+
+def test_theme_toggle_sits_inside_the_bar(client):
+    """Плавающая кнопка темы висела поверх правого края и наезжала на
+    «Выйти». В шапке она должна стоять в потоке."""
+    assert 'class="theme-toggle in-bar"' in _admin_client().get("/").text

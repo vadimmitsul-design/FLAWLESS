@@ -94,7 +94,7 @@
   h1,h2,h3{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;
     margin:0;letter-spacing:-0.018em;}
   .mono{font-family:'JetBrains Mono',ui-monospace,monospace;}
-  .wrap{max-width:1080px;margin:0 auto;padding:0 32px;}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 32px;}
   .muted{color:var(--text-faint);font-size:0.9rem;}
   table{width:100%;border-collapse:collapse;margin:1rem 0;}
   th{text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-faint);font-weight:700;padding:0 0 12px;}
@@ -267,42 +267,97 @@
     .js-reveal .u-reveal.is-in{opacity:1;transform:none;
       transition:opacity .5s cubic-bezier(.22,.61,.36,1), transform .5s cubic-bezier(.22,.61,.36,1);}
   }
+  /* ─── шапка кабинета ───
+     Было: тринадцать ссылок в один ряд с повторённым инлайн-стилем. При
+     роли админа строка переполнялась, «Сброс паролей» и «API-ключи»
+     ломались на две строки и распирали шапку. Теперь администраторские
+     разделы собраны в один выпадающий список. */
+  .cab{border-bottom:1px solid var(--border);background:var(--bg);}
+  .cab-row{height:66px;display:flex;align-items:center;justify-content:space-between;gap:20px;}
+  .cab-left{display:flex;align-items:center;gap:34px;min-width:0;flex:1 1 auto;}
+  .cab-links{display:flex;align-items:center;gap:22px;min-width:0;overflow-x:auto;
+    scrollbar-width:none;}
+  .cab-links::-webkit-scrollbar{display:none;}
+  .nav-link{font-size:14.5px;font-weight:600;color:var(--text-dim);white-space:nowrap;}
+  .nav-link:hover{color:var(--text);}
+
+  .nav-drop{position:relative;}
+  .nav-drop > summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    font-size:14.5px;font-weight:600;color:var(--text-dim);white-space:nowrap;}
+  .nav-drop > summary::-webkit-details-marker{display:none;}
+  .nav-drop > summary:hover{color:var(--text);}
+  .nav-drop[open] > summary{color:var(--accent);}
+  .nav-drop > summary::after{content:"";width:5px;height:5px;border-right:1.6px solid currentColor;
+    border-bottom:1.6px solid currentColor;transform:rotate(45deg) translate(-1px,-1px);}
+  .nav-drop-menu{position:absolute;top:calc(100% + 14px);left:-14px;z-index:60;min-width:216px;
+    background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px;
+    box-shadow:0 24px 48px -24px var(--shadow-soft);}
+  .nav-drop-menu a{display:block;padding:9px 12px;border-radius:8px;font-size:14.5px;font-weight:600;
+    color:var(--text-dim);white-space:nowrap;}
+  .nav-drop-menu a:hover{background:var(--surface-hi);color:var(--text);}
+  .nav-drop-menu .sep{height:1px;background:var(--border);margin:7px 4px;}
+
+  .cab-right{display:flex;align-items:center;gap:12px;flex:0 0 auto;}
+  .cab-user{display:flex;align-items:center;gap:9px;min-width:0;}
+  .cab-user span{font-size:14px;color:var(--text-dim);white-space:nowrap;
+    max-width:14ch;overflow:hidden;text-overflow:ellipsis;}
+  @media (max-width:900px){.cab-user span{display:none;}}
+
   .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
+  /* В шапке кнопка встаёт в поток: плавающая наезжала на «Выйти». */
+  .theme-toggle.in-bar{position:static;width:38px;height:38px;font-size:16px;flex:0 0 auto;}
 </style>
 {% block head %}{% endblock %}
 </head>
 <body>
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
 {% if customer %}
-<div style="border-bottom:1px solid var(--border);">
-  <div class="wrap" style="height:68px;display:flex;align-items:center;justify-content:space-between;">
-    <div style="display:flex;align-items:center;gap:40px;">
+<div class="cab">
+  <div class="wrap cab-row">
+    <div class="cab-left">
       <a href="/" class="logo" style="color:var(--text);">
-        <span class="wordmark" style="font-size:19px;">Flawless</span>
+        <span class="wordmark" style="font-size:20px;">Flawless</span>
         {% if features.instance_name %}<span class="badge badge-role" style="margin-left:2px;">{{ features.instance_name }}</span>{% endif %}
       </a>
-      <div style="display:flex;gap:28px;">
-        <a href="/" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Кабинет</a>
-        <a href="/chat" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Чат</a>
-        {% if features.enable_shop %}<a href="/shop" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Магазин</a>{% endif %}
-        {% if features.enable_prompts %}<a href="/prompts" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Промпты</a>{% endif %}
-        {% if features.enable_archive %}<a href="/archive" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Архив</a>{% endif %}
-        {% if customer.role == 'admin' %}
-        <a href="/admin/overview" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Обзор</a>
-        <a href="/admin/customers" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Люди</a>
-        <a href="/admin/invites" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Приглашения</a>
-        <a href="/admin/pricing" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Цены</a>
-        {% if features.enable_shop %}<a href="/admin/orders" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Заказы</a>{% endif %}
-        <a href="/admin/topups" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Пополнения</a>
-        <a href="/admin/password-resets" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">Сброс паролей</a>
-        <a href="/admin/api-keys" style="font-size:14.5px;font-weight:600;color:var(--text-dim);">API-ключи</a>
-        {% endif %}
-      </div>
+      <nav class="cab-links">
+        <a class="nav-link" href="/">Кабинет</a>
+        <a class="nav-link" href="/chat">Чат</a>
+        {% if features.enable_shop %}<a class="nav-link" href="/shop">Магазин</a>{% endif %}
+        {% if features.enable_prompts %}<a class="nav-link" href="/prompts">Промпты</a>{% endif %}
+        {% if features.enable_archive %}<a class="nav-link" href="/archive">Архив</a>{% endif %}
+        <a class="nav-link" href="/docs">Документация</a>
+      </nav>
     </div>
-    <div class="row">
-      {% if customer.role == 'admin' %}<span class="badge badge-role mono">admin</span>{% endif %}
-      <span style="font-size:14px;color:var(--text-dim);">{{ customer.name }}</span>
-      <div class="avatar">{{ customer.name[:2]|upper }}</div>
+
+    <div class="cab-right">
+      {% if customer.role == 'admin' %}
+      {# Меню админа стоит справа, а не в общем ряду ссылок: ряд прокручивается
+         по горизонтали и обрезал бы раскрытый список. И по смыслу инструменты
+         администратора — не раздел кабинета. #}
+      <details class="nav-drop">
+        <summary>Админка</summary>
+        <div class="nav-drop-menu" style="left:auto;right:-8px;">
+          <a href="/admin/overview">Обзор</a>
+          <a href="/admin/customers">Люди</a>
+          <a href="/admin/invites">Приглашения</a>
+          <div class="sep"></div>
+          <a href="/admin/pricing">Наценка и курс</a>
+          <a href="/admin/topups">Пополнения</a>
+          {% if features.enable_shop %}<a href="/admin/orders">Заказы</a>{% endif %}
+          <a href="/admin/reconciliation">Сверка и маржа</a>
+          <div class="sep"></div>
+          <a href="/admin/api-keys">API-ключи</a>
+          <a href="/admin/password-resets">Сброс паролей</a>
+        </div>
+      </details>
+      {% endif %}
+      <button type="button" class="theme-toggle in-bar" onclick="toggleTheme()"
+              title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
+      <div class="cab-user">
+        <div class="avatar">{{ customer.name[:2]|upper }}</div>
+        <span>{{ customer.name }}</span>
+        {% if customer.role == 'admin' %}<span class="badge badge-role mono">admin</span>{% endif %}
+      </div>
       <form class="inline" method="post" action="/logout">
         <button type="submit" class="secondary" style="height:36px;padding:0 14px;font-size:13px;">Выйти</button>
       </form>
@@ -324,6 +379,14 @@ function toggleTheme(){
   try { localStorage.setItem('theme', next); } catch (e) {}
   applyThemeIcon();
 }
+// Если кнопка темы есть в шапке, плавающая не нужна: она висела поверх
+// правого края и наезжала на «Выйти». Убираем её здесь, а не условием в
+// шаблоне, — так ни одна страница не может забыть про это.
+(function(){
+  if (!document.querySelector('.theme-toggle.in-bar')) return;
+  document.querySelectorAll('.theme-toggle:not(.in-bar)').forEach(function(b){ b.remove(); });
+})();
+
 applyThemeIcon();
 
 // Появление блоков при скролле. Класс js-reveal ставится скриптом: без JS
@@ -360,6 +423,19 @@ applyThemeIcon();
     document.documentElement.classList.remove('js-reveal');
     items.forEach(function(el){ el.classList.add('is-in'); });
   }, 1100);
+})();
+
+// Выпадающее меню на <details>: работает и без скрипта, но само не
+// закрывается по клику мимо — это чинится здесь.
+(function(){
+  var drops = document.querySelectorAll('.nav-drop');
+  if (!drops.length) return;
+  document.addEventListener('click', function(e){
+    drops.forEach(function(d){ if (!d.contains(e.target)) d.removeAttribute('open'); });
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape') drops.forEach(function(d){ d.removeAttribute('open'); });
+  });
 })();
 </script>
 </body>
