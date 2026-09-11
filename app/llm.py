@@ -61,6 +61,20 @@ def known_models() -> list[str]:
     return list(_alias_map.keys())
 
 
+def alias_for(provider: str, model: str) -> str | None:
+    """(provider, model) -> алиас, если такая модель есть в реестре.
+
+    Нужна интерфейсу: в usage_events хранится пара провайдера, а клиент
+    знает модель по короткому алиасу — тому, что он пишет в запросе.
+    Показывать ему «anthropic/claude-sonnet-5» вместо «claude-sonnet»
+    значит показывать чужое имя.
+    """
+    for alias, pair in _alias_map.items():
+        if pair == (provider, model):
+            return alias
+    return None
+
+
 def resolve_alias(alias: str) -> tuple[str, str]:
     """alias из тела запроса ("model") -> (provider, model) для прайса и учёта."""
     if alias not in _alias_map:

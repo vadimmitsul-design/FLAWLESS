@@ -102,6 +102,24 @@ class _FeatureFlags:
         return settings.enable_archive
 
 
+def _money(value, decimals: int = 2) -> str:
+    """Рубли по-русски: пробел между тысячами, запятая перед копейками.
+    Один фильтр на весь интерфейс — иначе суммы в разных таблицах выглядят
+    по-разному и в них перестают верить."""
+    if value is None:
+        return "—"
+    text = f"{float(value):,.{decimals}f}".replace(",", " ").replace(".", ",")
+    return text
+
+
+def _thousands(value) -> str:
+    if value is None:
+        return "—"
+    return f"{int(value):,}".replace(",", " ")
+
+
+templates.env.filters["money"] = _money
+templates.env.filters["thousands"] = _thousands
 templates.env.globals["features"] = _FeatureFlags()
 
 
@@ -692,6 +710,120 @@ async def page_solutions(slug: str, request: Request, session: AsyncSession = De
 # ---------- веб: кабинет ----------
 
 
+def _sparkline(values: list[float], width: float = 560.0, height: float = 92.0) -> dict:
+    """Путь для SVG-графика расхода по дням.
+
+    Считается на сервере, а не в браузере: график должен быть виден и когда
+    скрипты не отработали, и на скриншоте, и в печати.
+    """
+    if not values:
+        return {"line": "", "area": "", "max": 0.0}
+    top, bottom = 10.0, height - 12.0
+    left, right = 2.0, width - 2.0
+    peak = max(values) or 1.0
+    points = []
+    for i, value in enumerate(values):
+        x = left if len(values) == 1 else left + (right - left) * i / (len(values) - 1)
+        y = bottom - (bottom - top) * (value / peak)
+        points.append((round(x, 1), round(y, 1)))
+    line = f"M {points[0][0]} {points[0][1]}"
+    for i in range(1, len(points)):
+        (px, py), (x, y) = points[i - 1], points[i]
+        mid = round((px + x) / 2, 1)
+        line += f" C {mid} {py} {mid} {y} {x} {y}"
+    area = f"{line} L {points[-1][0]} {height} L {points[0][0]} {height} Z"
+    return {"line": line, "area": area, "max": peak, "last": points[-1]}
+
+
+async def _spend_summary(session: AsyncSession, customer: Customer, days: int = 14) -> dict:
+    """Сколько человек потратил: итоги, разбивка по дням и место относительно
+    его потолков.
+
+    Считается по customer_id (кто вызывал), а не по billing_customer_id (с
+    чьего кошелька списано): в кабинете человек хочет видеть СВОЙ расход.
+    У детского аккаунта платит родитель, но вызовы всё равно его.
+    """
+    now = utcnow()
+    since = now - timedelta(days=days)
+
+    total, calls, tokens = (
+        await session.execute(
+            select(
+                func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+                func.count(UsageEvent.id),
+                func.coalesce(
+                    func.sum(
+                        func.coalesce(UsageEvent.input_tokens, 0)
+                        + func.coalesce(UsageEvent.output_tokens, 0)
+                    ),
+                    0,
+                ),
+            ).where(
+                UsageEvent.customer_id == customer.id,
+                UsageEvent.created_at >= since,
+                UsageEvent.charged_rub.is_not(None),
+            )
+        )
+    ).one()
+
+    # Группировка по дате средствами БД: тянуть в память все вызовы за две
+    # недели нельзя — у активного клиента это десятки тысяч строк.
+    # func.date() есть и в SQLite, и в PostgreSQL.
+    by_day = dict(
+        (str(day), float(amount))
+        for day, amount in (
+            await session.execute(
+                select(
+                    func.date(UsageEvent.created_at).label("day"),
+                    func.coalesce(func.sum(UsageEvent.charged_rub), 0),
+                )
+                .where(
+                    UsageEvent.customer_id == customer.id,
+                    UsageEvent.created_at >= since,
+                    UsageEvent.charged_rub.is_not(None),
+                )
+                .group_by(func.date(UsageEvent.created_at))
+            )
+        ).all()
+    )
+    series = [
+        by_day.get(str((now - timedelta(days=days - 1 - i)).date()), 0.0) for i in range(days)
+    ]
+
+    payer_id = billing.resolve_billing_customer_id(customer)
+    spent_today = await billing.spent_since(
+        session, now.replace(hour=0, minute=0, second=0, microsecond=0), billing_customer_id=payer_id
+    )
+    spent_month = await billing.spent_since(
+        session, now.replace(day=1, hour=0, minute=0, second=0, microsecond=0), billing_customer_id=payer_id
+    )
+
+    balance = float(customer.balance_rub)
+    per_day = float(total) / days if total else 0.0
+    return {
+        "days": days,
+        "total": float(total),
+        "calls": int(calls),
+        "tokens": int(tokens),
+        "avg_call": float(total) / calls if calls else 0.0,
+        "series": series,
+        "chart": _sparkline(series),
+        "peak_day": max(series) if series else 0.0,
+        "spent_today": float(spent_today),
+        "spent_month": float(spent_month),
+        "daily_limit": float(customer.daily_limit_rub) if customer.daily_limit_rub is not None else None,
+        "monthly_limit": float(customer.monthly_limit_rub) if customer.monthly_limit_rub is not None else None,
+        # Сколько дней протянет баланс при текущем темпе. Оценка грубая, и
+        # в интерфейсе это сказано. Больше полугода не показываем: «хватит
+        # на 1720 дней» — ложная точность, которая только мешает верить
+        # остальным цифрам.
+        "days_left": (
+            int(balance / per_day) if per_day > 0 and balance > 0 and balance / per_day <= 180 else None
+        ),
+        "runway_long": bool(per_day > 0 and balance > 0 and balance / per_day > 180),
+    }
+
+
 @app.get("/")
 async def dashboard(
     request: Request,
@@ -752,6 +884,12 @@ async def dashboard(
             "telegram_linked": telegram_link is not None,
             "telegram_bot_username": telegram_bot.bot_username,
             "telegram_code": request.query_params.get("telegram_code"),
+            "spend": await _spend_summary(session, customer),
+            # Чтобы в истории стоял алиас, который клиент пишет в запросе,
+            # а не внутренний идентификатор у провайдера.
+            "alias_of": {
+                (e.provider, e.model): llm.alias_for(e.provider, e.model) for e in events
+            },
         },
     )
 

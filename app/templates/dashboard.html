@@ -1,172 +1,384 @@
 {% extends "base.html" %}
 {% block title %}Кабинет — Flawless{% endblock %}
-{% block content %}
-<div class="wrap" style="padding:40px 32px 80px;">
 
-  <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:20px;">
-    <div class="card" style="display:flex;flex-direction:column;justify-content:space-between;">
-      <div>
-        <div class="muted">Баланс</div>
-        <div class="stat">{{ "%.2f"|format(customer.balance_rub) }} ₽</div>
+{% block head %}
+<style>
+  .cab-page{padding:36px 0 90px;}
+
+  /* ─── верхняя сводка ───
+     Баланс — главная цифра страницы, остальное подчинено ему. Раньше здесь
+     стояли две одинаковые карточки, и «баланс» весил ровно столько же,
+     сколько список моделей рядом. */
+  .sum{display:grid;grid-template-columns:minmax(300px,1fr) minmax(0,1.5fr);gap:40px;
+    align-items:end;padding-bottom:28px;border-bottom:1px solid var(--border);}
+  @media (max-width:900px){.sum{grid-template-columns:1fr;gap:26px;}}
+
+  .bal-cap{font-size:12.5px;font-weight:800;letter-spacing:0.1em;text-transform:uppercase;
+    color:var(--text-faint);}
+  .bal-sum{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:clamp(38px,5vw,54px);
+    font-weight:600;letter-spacing:-0.035em;font-variant-numeric:tabular-nums;line-height:1;
+    margin-top:10px;}
+  .bal-note{font-size:14px;line-height:1.55;color:var(--text-dim);margin-top:12px;max-width:44ch;}
+  .bal-actions{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;}
+
+  .figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:1px;
+    background:var(--border);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  .fig{background:var(--surface);padding:15px 16px;}
+  .fig b{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:19px;
+    font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-0.02em;}
+  .fig span{display:block;font-size:12px;color:var(--text-faint);margin-top:5px;line-height:1.35;}
+
+  /* ─── график расхода ─── */
+  .chart-box{padding:30px 0 6px;}
+  .chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;margin-bottom:14px;}
+  .chart-head h2{font-size:17px;}
+  .chart-head .peak{font-size:12.5px;color:var(--text-faint);
+    font-family:'JetBrains Mono',ui-monospace,monospace;}
+  .chart-svg{display:block;width:100%;height:92px;}
+  .chart-axis{display:flex;justify-content:space-between;font-size:12px;color:var(--text-faint);
+    padding-top:8px;border-top:1px solid var(--border);}
+  .chart-empty{padding:22px 0 26px;color:var(--text-faint);font-size:14.5px;}
+
+  /* ─── потолки расхода ─── */
+  .caps{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:26px;
+    padding:26px 0 2px;}
+  .cap-row{font-size:13.5px;color:var(--text-dim);display:flex;justify-content:space-between;gap:12px;}
+  .cap-bar{height:6px;border-radius:99px;background:var(--surface-hi);margin-top:9px;overflow:hidden;}
+  .cap-fill{height:100%;border-radius:99px;background:var(--accent);}
+  .cap-fill.warn{background:var(--warn);}
+  .cap-fill.bad{background:var(--bad);}
+
+  /* ─── две колонки ─── */
+  .cols{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(280px,0.95fr);gap:34px;
+    margin-top:38px;align-items:start;}
+  @media (max-width:1000px){.cols{grid-template-columns:1fr;}}
+
+  /* Блок — линейка сверху вместо коробки. Обводить каждый раздел незачем:
+     они идут друг за другом и и так разделены. */
+  .blk{border-top:2px solid var(--text);padding-top:20px;margin-bottom:38px;}
+  .blk:last-child{margin-bottom:0;}
+  .blk-sub{border-top-color:var(--border);}
+  .blk-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+    flex-wrap:wrap;margin-bottom:8px;}
+  .blk-head h2{font-size:17px;}
+  .blk-note{font-size:13.5px;line-height:1.6;color:var(--text-faint);margin:0 0 16px;}
+
+  /* ─── таблицы ─── */
+  .calls{width:100%;border-collapse:collapse;}
+  .calls th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.07em;
+    color:var(--text-faint);font-weight:800;padding:0 12px 10px 0;}
+  .calls td{padding:11px 12px 11px 0;border-top:1px solid var(--border);font-size:13.5px;
+    vertical-align:baseline;}
+  .calls .m{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;color:var(--text-dim);}
+  .calls th.n,.calls td.n{font-family:'JetBrains Mono',ui-monospace,monospace;
+    font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;}
+  .calls th.n{font-family:'Manrope',sans-serif;}
+  .calls .when{color:var(--text-faint);font-size:12.5px;white-space:nowrap;}
+
+  /* ─── ключи ─── */
+  .key{border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px;
+    background:var(--surface);}
+  .key-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+  .key-top b{font-size:14.5px;}
+  .key-tail{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;color:var(--text-faint);}
+  .key-limits{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+  .key-limits input{height:34px;font-size:13px;width:102px;}
+  .key-cap{font-size:12px;color:var(--text-faint);margin-top:8px;}
+
+  .empty{font-size:14px;color:var(--text-faint);}
+  .chips{display:flex;flex-wrap:wrap;gap:7px;}
+  .chip-m{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;
+    background:var(--surface-hi);border:1px solid var(--border);border-radius:7px;
+    padding:5px 9px;color:var(--text-dim);}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap cab-page">
+
+  <div class="sum">
+    <div>
+      <div class="bal-cap">Баланс</div>
+      <div class="bal-sum">{{ customer.balance_rub|money }}&nbsp;₽</div>
+      {% if spend.days_left %}
+      <div class="bal-note">
+        При нынешнем темпе хватит примерно на {{ spend.days_left }}
+        {%- if spend.days_left % 10 == 1 and spend.days_left % 100 != 11 %} день
+        {%- elif spend.days_left % 10 in [2, 3, 4] and spend.days_left % 100 not in [12, 13, 14] %} дня
+        {%- else %} дней{% endif %}. Оценка по среднему за {{ spend.days }} дней — настоящий расход неравномерный.
+      </div>
+      {% elif spend.runway_long %}
+      <div class="bal-note">
+        При нынешнем темпе баланса хватит надолго — больше чем на полгода.
+      </div>
+      {% elif not spend.total %}
+      <div class="bal-note">Вызовов ещё не было. Расход появится здесь после первого запроса.</div>
+      {% endif %}
+      <div class="bal-actions">
+        <a href="#topup" class="u-btn u-btn-primary u-btn-sm">Пополнить</a>
+        <a href="/chat" class="u-btn u-btn-ghost u-btn-sm">Открыть чат</a>
       </div>
     </div>
 
-    <div class="card">
-      <h3 style="font-size:16px;margin-bottom:14px;">Доступные модели</h3>
-      <div class="row" style="flex-wrap:wrap;gap:8px;">
-        {% for m in models %}<span class="mono" style="font-size:12.5px;background:var(--surface-hi);border:1px solid var(--border);border-radius:6px;padding:4px 9px;color:var(--text-dim);">{{ m }}</span>{% endfor %}
+    <div class="figs">
+      <div class="fig">
+        <b>{{ spend.total|money }}&nbsp;₽</b>
+        <span>потрачено за {{ spend.days }} дней</span>
+      </div>
+      <div class="fig">
+        <b>{{ spend.calls|thousands }}</b>
+        <span>вызовов</span>
+      </div>
+      <div class="fig">
+        <b>{{ spend.avg_call|money(4) }}&nbsp;₽</b>
+        <span>средний вызов</span>
+      </div>
+      <div class="fig">
+        <b>{{ spend.tokens|thousands }}</b>
+        <span>токенов</span>
       </div>
     </div>
   </div>
 
-  <div class="card" style="margin-top:20px;">
-    <h3 style="font-size:16px;margin-bottom:4px;">API-ключи</h3>
-    <p class="muted" style="margin-top:0;">Можно завести несколько — например, отдельный на каждую интеграцию — и настроить лимит расхода на каждый, чтобы кража одного ключа не тратила весь баланс.</p>
-    {% if not api_keys %}
-    <p class="muted">Ключей ещё нет.</p>
+  <div class="chart-box">
+    <div class="chart-head">
+      <h2>Расход по дням</h2>
+      {% if spend.peak_day %}<span class="peak">максимум за день — {{ spend.peak_day|money }} ₽</span>{% endif %}
+    </div>
+    {% if spend.total %}
+    <svg class="chart-svg" viewBox="0 0 560 92" preserveAspectRatio="none" role="img"
+         aria-label="Расход по дням за {{ spend.days }} дней, максимум {{ spend.peak_day|money }} рублей за день">
+      <defs>
+        <linearGradient id="cab-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.24"/>
+          <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <path d="{{ spend.chart.area }}" fill="url(#cab-fill)"/>
+      <path d="{{ spend.chart.line }}" fill="none" stroke="var(--accent)" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <div class="chart-axis">
+      <span>{{ spend.days }} дней назад</span>
+      <span>сегодня</span>
+    </div>
     {% else %}
-    <table>
-      <thead><tr><th>Название</th><th>Ключ</th><th>Лимит, ₽/день</th><th>Лимит, ₽/месяц</th><th></th></tr></thead>
-      <tbody>
-      {% for k in api_keys %}
-      <tr>
-        <td>{{ k.name or "Без названия" }}</td>
-        <td class="mono">…{{ k.last_four }}</td>
-        <td colspan="2">
-          <form class="inline" method="post" action="/api-keys/{{ k.id }}/limits" style="display:flex;gap:8px;align-items:center;">
-            <input name="daily_limit_rub" type="number" step="0.01" min="0" value="{{ '%.2f'|format(k.daily_limit_rub) if k.daily_limit_rub is not none else '' }}" placeholder="без лимита" style="width:120px;height:34px;font-size:13px;">
-            <input name="monthly_limit_rub" type="number" step="0.01" min="0" value="{{ '%.2f'|format(k.monthly_limit_rub) if k.monthly_limit_rub is not none else '' }}" placeholder="без лимита" style="width:120px;height:34px;font-size:13px;">
-            <button type="submit" class="secondary" style="height:34px;padding:0 12px;font-size:13px;">Сохранить</button>
+    <div class="chart-empty">Пока нечего показывать — график появится после первых вызовов.</div>
+    {% endif %}
+  </div>
+
+  {% if spend.daily_limit or spend.monthly_limit %}
+  <div class="caps">
+    {% if spend.daily_limit %}
+    {% set pct = spend.spent_today / spend.daily_limit * 100 %}
+    <div>
+      <div class="cap-row">
+        <span>Потолок на сегодня</span>
+        <span class="mono">{{ spend.spent_today|money }} / {{ spend.daily_limit|money }} ₽</span>
+      </div>
+      <div class="cap-bar">
+        <div class="cap-fill {% if pct >= 90 %}bad{% elif pct >= 70 %}warn{% endif %}"
+             style="width:max(4px, {{ [pct, 100]|min|round(1) }}%);"></div>
+      </div>
+    </div>
+    {% endif %}
+    {% if spend.monthly_limit %}
+    {% set pctm = spend.spent_month / spend.monthly_limit * 100 %}
+    <div>
+      <div class="cap-row">
+        <span>Потолок на месяц</span>
+        <span class="mono">{{ spend.spent_month|money }} / {{ spend.monthly_limit|money }} ₽</span>
+      </div>
+      <div class="cap-bar">
+        <div class="cap-fill {% if pctm >= 90 %}bad{% elif pctm >= 70 %}warn{% endif %}"
+             style="width:max(4px, {{ [pctm, 100]|min|round(1) }}%);"></div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="cols">
+    <div>
+      <div class="blk">
+        <div class="blk-head"><h2>Последние вызовы</h2></div>
+        {% if not events %}
+        <p class="empty">Пока не было ни одного вызова.</p>
+        {% else %}
+        <table class="calls">
+          <thead>
+            <tr>
+              <th>Модель</th><th class="n">Токены</th><th class="n">Списано</th>
+              <th>Статус</th><th>Когда</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for e in events %}
+          <tr>
+            <td class="m" title="{{ e.provider }}/{{ e.model }}">{{ alias_of[(e.provider, e.model)] or e.model }}</td>
+            <td class="n">{{ e.input_tokens or "—" }} / {{ e.output_tokens or "—" }}</td>
+            <td class="n">{{ (e.charged_rub|money(4) ~ " ₽") if e.charged_rub is not none else "—" }}</td>
+            <td>
+              {% if e.status == 'success' %}<span class="badge badge-ok">ок</span>
+              {% elif e.status == 'failed' %}<span class="badge badge-bad">ошибка</span>
+              {% else %}<span class="badge badge-warn">идёт</span>{% endif %}
+              {% if e.dlp_redactions %}<span class="badge badge-role" title="Вырезано перед отправкой: {{ e.dlp_redactions }}">DLP</span>{% endif %}
+            </td>
+            <td class="when">{{ e.created_at.strftime("%d.%m %H:%M") }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+
+      <div class="blk blk-sub" id="topup">
+        <div class="blk-head"><h2>Пополнить баланс</h2></div>
+        <p class="blk-note">
+          Приём карт ещё не подключён. Подайте заявку, переведите сумму по реквизитам —
+          их пришлём отдельно, — и администратор подтвердит зачисление.
+        </p>
+        <form method="post" action="/topups/new"
+              style="display:grid;grid-template-columns:180px 1fr auto;gap:12px;align-items:end;">
+          <div>
+            <label>Сумма, ₽</label>
+            <input name="amount_rub" type="number" step="0.01" min="1" required>
+          </div>
+          <div>
+            <label>Комментарий</label>
+            <input name="note" placeholder="необязательно">
+          </div>
+          <button type="submit" style="height:44px;">Подать заявку</button>
+        </form>
+        {% if topups %}
+        <table class="calls" style="margin-top:18px;">
+          <thead><tr><th class="n">Сумма</th><th>Статус</th><th>Дата</th></tr></thead>
+          <tbody>
+          {% for t in topups %}
+          <tr>
+            <td class="n">{{ t.amount_rub|money }} ₽</td>
+            <td>
+              {% if t.status == 'requested' %}<span class="badge badge-warn">ждёт подтверждения</span>
+              {% elif t.status == 'confirmed' %}<span class="badge badge-ok">зачислено</span>
+              {% else %}<span class="badge badge-bad">отклонено</span>{% endif %}
+            </td>
+            <td class="when">{{ t.created_at.strftime("%d.%m.%Y") }}</td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+
+      {% if features.enable_children and not customer.is_child %}
+      <div class="blk blk-sub">
+        <div class="blk-head">
+          <h2>Детские аккаунты</h2>
+          <a href="/children/new" class="u-btn u-btn-ghost u-btn-sm">Добавить</a>
+        </div>
+        {% if not children %}
+        <p class="empty">Пока нет ни одного.</p>
+        {% else %}
+        <table class="calls">
+          <thead><tr><th>Имя</th><th>Email</th><th></th></tr></thead>
+          <tbody>
+          {% for ch in children %}
+          <tr>
+            <td>{{ ch.name }}</td>
+            <td class="m">{{ ch.email }}</td>
+            <td><a href="/children/{{ ch.id }}">история →</a></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="blk">
+        <div class="blk-head"><h2>API-ключи</h2></div>
+        <p class="blk-note">
+          Заведите отдельный ключ на каждую интеграцию и поставьте ему лимит:
+          тогда утечка одного ключа не съест весь баланс.
+        </p>
+
+        {% for k in api_keys %}
+        <div class="key">
+          <div class="key-top">
+            <b>{{ k.name or "Без названия" }}</b>
+            <span class="key-tail">…{{ k.last_four }}</span>
+          </div>
+          <form method="post" action="/api-keys/{{ k.id }}/limits" class="key-limits">
+            <input name="daily_limit_rub" type="number" step="0.01" min="0"
+                   value="{{ '%.2f'|format(k.daily_limit_rub) if k.daily_limit_rub is not none else '' }}"
+                   placeholder="₽/день" title="Лимит в рублях на день">
+            <input name="monthly_limit_rub" type="number" step="0.01" min="0"
+                   value="{{ '%.2f'|format(k.monthly_limit_rub) if k.monthly_limit_rub is not none else '' }}"
+                   placeholder="₽/месяц" title="Лимит в рублях на месяц">
+            <button type="submit" class="secondary"
+                    style="height:34px;padding:0 12px;font-size:13px;">Сохранить</button>
           </form>
           {% if k.admin_daily_limit_rub is not none or k.admin_monthly_limit_rub is not none %}
-          <div class="muted" style="margin-top:4px;">Потолок админа: {{ "%.2f"|format(k.admin_daily_limit_rub) ~ " ₽/день" if k.admin_daily_limit_rub is not none else "" }} {{ "%.2f"|format(k.admin_monthly_limit_rub) ~ " ₽/мес" if k.admin_monthly_limit_rub is not none else "" }}</div>
+          <div class="key-cap">
+            Потолок администратора:
+            {{ (k.admin_daily_limit_rub|money ~ " ₽/день") if k.admin_daily_limit_rub is not none else "" }}
+            {{ (k.admin_monthly_limit_rub|money ~ " ₽/мес") if k.admin_monthly_limit_rub is not none else "" }}
+          </div>
           {% endif %}
-        </td>
-        <td>
-          <form class="inline" method="post" action="/api-keys/{{ k.id }}/revoke">
-            <button type="submit" class="secondary" style="height:34px;padding:0 12px;font-size:13px;">Отозвать</button>
+          <form method="post" action="/api-keys/{{ k.id }}/revoke" style="margin-top:10px;">
+            <button type="submit" class="secondary"
+                    style="height:32px;padding:0 12px;font-size:12.5px;">Отозвать</button>
           </form>
-        </td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    <form method="post" action="/api-key/regenerate" style="display:flex;gap:10px;align-items:end;margin-top:16px;">
-      <div style="flex:1;">
-        <label>Название нового ключа</label>
-        <input name="name" placeholder="например, продакшен-сервер">
-      </div>
-      <button type="submit" style="height:44px;">Создать ключ</button>
-    </form>
-  </div>
+        </div>
+        {% else %}
+        <p class="empty">Ключей ещё нет.</p>
+        {% endfor %}
 
-  <div class="card" style="margin-top:20px;">
-    <h3 style="font-size:16px;margin-bottom:16px;">Пополнить баланс</h3>
-    <p class="muted" style="margin-top:0;">Оплата пока вручную: подайте заявку, переведите сумму по реквизитам (пришлём отдельно), админ подтвердит после поступления денег.</p>
-    <form method="post" action="/topups/new" style="display:grid;grid-template-columns:200px 1fr auto;gap:14px;align-items:end;">
-      <div>
-        <label>Сумма, ₽</label>
-        <input name="amount_rub" type="number" step="0.01" min="1" required>
+        <form method="post" action="/api-key/regenerate" style="margin-top:16px;">
+          <label>Название нового ключа</label>
+          <input name="name" placeholder="например, продакшен-сервер">
+          <button type="submit" style="height:42px;width:100%;margin-top:10px;">Создать ключ</button>
+        </form>
       </div>
-      <div>
-        <label>Комментарий</label>
-        <input name="note" placeholder="необязательно">
-      </div>
-      <button type="submit">Подать заявку</button>
-    </form>
-    {% if topups %}
-    <table>
-      <thead><tr><th>Сумма</th><th>Статус</th><th>Дата</th></tr></thead>
-      <tbody>
-      {% for t in topups %}
-      <tr>
-        <td class="mono">{{ "%.2f"|format(t.amount_rub) }} ₽</td>
-        <td>
-          {% if t.status == 'requested' %}<span class="badge badge-warn">ждёт подтверждения</span>
-          {% elif t.status == 'confirmed' %}<span class="badge badge-ok">зачислено</span>
-          {% else %}<span class="badge badge-bad">отклонено</span>{% endif %}
-        </td>
-        <td style="color:var(--text-faint);">{{ t.created_at.strftime("%d.%m.%Y") }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-  </div>
 
-  <div class="card" style="margin-top:20px;">
-    <h3 style="font-size:16px;margin-bottom:16px;">Последние вызовы</h3>
-    {% if not events %}
-    <p class="muted">Пока не было ни одного вызова API.</p>
-    {% else %}
-    <table>
-      <thead><tr><th>Модель</th><th>Токены (вход/выход)</th><th>Списано</th><th>Статус</th><th></th><th>Когда</th></tr></thead>
-      <tbody>
-      {% for e in events %}
-      <tr>
-        <td class="mono">{{ e.model }}</td>
-        <td class="mono">{{ e.input_tokens or "—" }} / {{ e.output_tokens or "—" }}</td>
-        <td class="mono">{{ ("%.4f"|format(e.charged_rub) ~ " ₽") if e.charged_rub is not none else "—" }}</td>
-        <td>
-          {% if e.status == 'success' %}<span class="badge badge-ok">ок</span>
-          {% elif e.status == 'failed' %}<span class="badge badge-bad">ошибка</span>
-          {% else %}<span class="badge badge-warn">в процессе</span>{% endif %}
-        </td>
-        <td>{% if e.dlp_redactions %}<span class="badge badge-role" title="Вырезано перед отправкой: {{ e.dlp_redactions }}">DLP</span>{% endif %}</td>
-        <td style="color:var(--text-faint);">{{ e.created_at.strftime("%d.%m.%Y %H:%M") }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-  </div>
-
-  {% if telegram_enabled %}
-  <div class="card" style="margin-top:20px;">
-    <h3 style="font-size:16px;margin-bottom:16px;">Telegram-секретарь</h3>
-    {% if telegram_linked %}
-    <p style="color:var(--accent-2);font-weight:600;margin:0;">✓ Аккаунт подключён — пишите или наговаривайте вопросы боту, ответы спишутся с этого баланса.</p>
-    {% else %}
-    <p class="muted" style="margin-top:0;">Задавайте вопросы голосом или текстом прямо в Telegram — ответы спишутся с вашего баланса Flawless.</p>
-    {% if telegram_code %}
-    <div style="background:var(--surface-hi);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;margin-bottom:14px;">
-      <div class="muted" style="margin-bottom:6px;">
-        {% if telegram_bot_username %}Напишите боту <a href="https://t.me/{{ telegram_bot_username }}" target="_blank">@{{ telegram_bot_username }}</a>:{% else %}Отправьте боту сообщение:{% endif %}
+      <div class="blk blk-sub">
+        <div class="blk-head"><h2>Доступные модели</h2></div>
+        <div class="chips">
+          {% for m in models %}<span class="chip-m">{{ m }}</span>{% endfor %}
+        </div>
+        <p class="blk-note" style="margin:14px 0 0;">
+          В списке только модели с действующей ценой — те, что примет вызов.
+          <a href="/docs/models">Цены и описания →</a>
+        </p>
       </div>
-      <code style="font-size:16px;">/start {{ telegram_code }}</code>
+
+      {% if telegram_enabled %}
+      <div class="blk blk-sub">
+        <div class="blk-head"><h2>Telegram</h2></div>
+        {% if telegram_linked %}
+        <p class="blk-note" style="color:var(--accent-2);font-weight:600;">
+          ✓ Аккаунт подключён. Пишите или наговаривайте вопросы боту — ответы спишутся с этого баланса.
+        </p>
+        {% else %}
+        <p class="blk-note">Вопросы голосом или текстом прямо в Telegram, расход — с этого же баланса.</p>
+        {% if telegram_code %}
+        <div style="background:var(--accent-wash);border:1px solid var(--accent);border-radius:10px;padding:13px 15px;margin-bottom:12px;">
+          <div class="blk-note" style="margin:0 0 6px;">
+            {% if telegram_bot_username %}Напишите боту <a href="https://t.me/{{ telegram_bot_username }}" target="_blank" rel="noopener">@{{ telegram_bot_username }}</a>:{% else %}Отправьте боту сообщение:{% endif %}
+          </div>
+          <code style="font-size:15px;">/start {{ telegram_code }}</code>
+        </div>
+        {% endif %}
+        <form method="post" action="/telegram/link">
+          <button type="submit" class="secondary">{{ "Получить новый код" if telegram_code else "Получить код привязки" }}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
-    {% endif %}
-    <form method="post" action="/telegram/link">
-      <button type="submit" class="secondary">{{ "Получить новый код" if telegram_code else "Получить код привязки" }}</button>
-    </form>
-    {% endif %}
   </div>
-  {% endif %}
-
-  {% if features.enable_children and not customer.is_child %}
-  <div class="card" style="margin-top:20px;margin-bottom:0;">
-    <div class="row" style="justify-content:space-between;margin-bottom:16px;">
-      <h3 style="font-size:16px;">Мои дети (тариф «Репетитор»)</h3>
-      <a href="/children/new"><button type="button" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">Добавить</button></a>
-    </div>
-    {% if not children %}
-    <p class="muted">Детских аккаунтов пока нет.</p>
-    {% else %}
-    <table>
-      <thead><tr><th>Имя</th><th>Email</th><th></th></tr></thead>
-      <tbody>
-      {% for ch in children %}
-      <tr>
-        <td>{{ ch.name }}</td>
-        <td class="mono">{{ ch.email }}</td>
-        <td><a href="/children/{{ ch.id }}">история →</a></td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-  </div>
-  {% endif %}
 </div>
 {% endblock %}

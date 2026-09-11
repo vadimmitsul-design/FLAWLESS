@@ -8,6 +8,16 @@ conftest.py). Хелперы продублированы из test_api_flow.py 
 import re
 
 ADMIN_EMAIL = "admin@test.local"
+
+
+def _plain(html: str) -> str:
+    """Текст страницы без типографских пробелов.
+
+    Суммы выводятся по-русски: неразрывный пробел между тысячами и
+    сущность &nbsp; перед знаком рубля, чтобы число не отрывалось от
+    единицы при переносе. Для проверок это шум — схлопываем в обычный
+    пробел."""
+    return html.replace("&nbsp;", " ").replace(" ", " ")
 ADMIN_PASSWORD = "AdminPass123"
 
 
@@ -96,7 +106,8 @@ def test_shop_refund_returns_balance(client):
     assert "возврат" in r.text
 
     dashboard = client.get("/").text
-    assert "5000.00 ₽" in dashboard  # заказ + возврат вернули баланс к исходному пополнению
+    # заказ + возврат вернули баланс к исходному пополнению
+    assert "5 000,00 ₽" in _plain(dashboard)
 
 
 # ---------- библиотека промптов ----------
@@ -137,7 +148,9 @@ def test_prompt_purchase_charges_fee_and_pays_royalty(client, monkeypatch):
     assert r.json()["choices"][0]["message"]["content"] == "looks risky"
 
     author_dashboard = author.get("/").text
-    assert re.search(r"2\.5000 ₽|2\.50 ₽", author_dashboard), "author should have received 50% royalty (2.50 ₽ of 5 ₽)"
+    assert re.search(r"2,5000 ₽|2,50 ₽", _plain(author_dashboard)), (
+        "автору должно было прийти 50% роялти — 2,50 ₽ из 5 ₽"
+    )
 
 
 def test_unknown_prompt_id_returns_404(client):
@@ -259,7 +272,7 @@ def test_child_account_full_flow():
     assert r.status_code == 200
 
     # ребёнок не платит сам
-    assert "0.00" in kid.get("/").text
+    assert "0,00 ₽" in _plain(kid.get("/").text)
 
     # у родителя видно ребёнка и его историю
     parent_dashboard = parent.get("/").text

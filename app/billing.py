@@ -150,6 +150,21 @@ async def _spent_since(
     return (await session.execute(stmt)).scalar_one()
 
 
+async def spent_since(
+    session: AsyncSession,
+    since: datetime,
+    *,
+    billing_customer_id: int | None = None,
+    api_key_id: int | None = None,
+) -> Decimal:
+    """То же, что _spent_since, но для внешних вызовов (кабинет, отчёты).
+    Отдельное имя, чтобы интерфейс не лез в приватную функцию биллинга и
+    формула «сколько потрачено» осталась одна на весь сервис."""
+    return await _spent_since(
+        session, since, billing_customer_id=billing_customer_id, api_key_id=api_key_id
+    )
+
+
 async def _enforce_limits(
     session: AsyncSession,
     scope: str,

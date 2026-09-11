@@ -8,6 +8,16 @@ import re
 
 from app import llm, ratelimit
 
+
+def _plain(html: str) -> str:
+    """Текст страницы без типографских пробелов.
+
+    Суммы выводятся по-русски: неразрывный пробел между тысячами и
+    сущность &nbsp; перед знаком рубля, чтобы число не отрывалось от
+    единицы при переносе. Для проверок это шум — схлопываем в обычный
+    пробел."""
+    return html.replace("&nbsp;", " ").replace(" ", " ")
+
 # Дублирует значения из conftest.py намеренно — импортировать оттуда не
 # стоит: pytest сам загружает conftest.py как модуль "conftest" (без
 # __init__.py в tests/), а `from tests.conftest import ...` привело бы к
@@ -52,7 +62,11 @@ def test_signup_login_dashboard(client):
     _signup(client, "flow1@test.local")
     r = client.get("/")
     assert r.status_code == 200
-    assert "0.00" in r.text  # свежий баланс
+    # Проверяем именно отрисованный баланс. Раньше здесь стояло "0.00",
+    # и после перевода сумм на русский формат тест продолжал проходить —
+    # но уже за счёт css-цветов вида oklch(97.6% 0.004 250), где тоже
+    # есть "0.00". Зелёный тест, не проверяющий ничего, хуже красного.
+    assert "0,00 ₽" in _plain(r.text)
 
     client.post("/logout")
     r = client.get("/", follow_redirects=False)
@@ -118,10 +132,11 @@ def test_topup_then_successful_call_deducts_balance(client):
 
     dashboard = client.get("/").text
     assert "gpt-5-mini" in dashboard
-    # Списание крошечное — на 2 знаках баланс визуально не меняется (100.00
-    # остаётся "100.00"), поэтому проверяем точную сумму в таблице вызовов,
-    # а не отображаемый баланс.
-    assert re.search(r"\d+\.\d{4} ₽", dashboard)
+    # Списание крошечное — на 2 знаках баланс визуально не меняется (100,00
+    # остаётся "100,00"), поэтому проверяем точную сумму в таблице вызовов,
+    # а не отображаемый баланс. Суммы выводятся по-русски: запятая перед
+    # копейками, неразрывный пробел между тысячами — для проверки это шум.
+    assert re.search(r"\d+,\d{4} ₽", _plain(dashboard))
 
 
 def test_streaming_call_bills_from_final_chunk_usage(client):

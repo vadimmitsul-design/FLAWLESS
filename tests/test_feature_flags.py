@@ -173,10 +173,10 @@ def test_children_routes_return_404_when_disabled(client, monkeypatch):
 
 def test_children_section_hidden_from_the_dashboard(client, monkeypatch):
     _signup(client, "flag_kids2@test.local")
-    assert "Репетитор" in client.get("/").text
+    assert "Детские аккаунты" in client.get("/").text
 
     monkeypatch.setattr(settings, "enable_children", False)
-    assert "Репетитор" not in client.get("/").text
+    assert "Детские аккаунты" not in client.get("/").text
 
 
 # ---------- архив ----------
