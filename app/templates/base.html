@@ -14,7 +14,7 @@
   } catch (e) {}
 })();
 </script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@0,700;0,800;0,900;1,800;1,900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
   /* Фирменные цвета сняты с логотипа: #3E8CB8 — мягкий стальной синий с
      уходом в циан, а не насыщенный королевский.
@@ -23,13 +23,13 @@
                   ниже 4.5:1 к белому, а сам фирменный слишком светлый (3.3:1).
      Светлая тема основная: публичный сайт и документация открываются светлыми. */
   :root{
-    --bg:oklch(97.4% 0.002 250);
-    --bg-2:oklch(95.6% 0.004 245);
+    --bg:oklch(97.6% 0.004 250);
+    --bg-2:oklch(94.4% 0.007 245);
     --surface:oklch(100% 0 0);
     --surface-hi:oklch(96.6% 0.005 245);
-    --border:oklch(89.5% 0.008 245);
-    --text:oklch(22% 0.015 245);
-    --text-dim:oklch(46% 0.014 245);
+    --border:oklch(88% 0.012 245);
+    --text:oklch(17% 0.020 245);
+    --text-dim:oklch(43% 0.016 245);
     --text-faint:oklch(61% 0.012 245);
     --brand:oklch(61% 0.101 237);
     --accent:oklch(54% 0.111 237);
@@ -43,15 +43,15 @@
     --badge-bad-bg:oklch(52% 0.20 25 / 0.14);
     --badge-role-bg:oklch(61% 0.101 237 / 0.14);
     --btn-on-accent:oklch(100% 0 0);
-    --shadow-soft:oklch(55% 0.02 245 / 0.18);
+    --shadow-soft:oklch(45% 0.04 245 / 0.22);
     --code-bg:oklch(23% 0.020 245);
     --code-text:oklch(93% 0.008 245);
     --code-border:oklch(31% 0.020 245);
-    --band:oklch(21% 0.038 247);
-    --band-2:oklch(26% 0.042 247);
+    --band:oklch(18% 0.048 249);
+    --band-2:oklch(23% 0.050 249);
     --band-text:oklch(97% 0.006 245);
     --band-dim:oklch(76% 0.018 245);
-    --band-line:oklch(33% 0.030 247);
+    --band-line:oklch(31% 0.038 249);
   }
   :root[data-theme="dark"]{
     --bg:oklch(17% 0.016 245);
@@ -88,11 +88,14 @@
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
   a{color:var(--accent-hi);text-decoration:none;}
   a:hover{color:var(--accent);}
-  /* Заголовки — тем же шрифтом, что и вордмарк в логотипе (Nunito,
-     тяжёлые начертания). Раньше стоял Space Grotesk: технично, но с
-     логотипом не имел ничего общего. */
-  h1,h2,h3{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;
-    margin:0;letter-spacing:-0.018em;}
+  /* Заголовки — Onest: современный гротеск с полной кириллицей.
+     Была попытка набрать заголовки шрифтом логотипа (Nunito) — вышло
+     по-детски: круглый дружелюбный шрифт во всю страницу не читается как
+     инструмент за деньги. Шрифт логотипа остался логотипу и акцентам
+     (курсивные цифры, выделенное слово) — этого хватает, чтобы страница
+     держалась вместе с фирменным знаком. */
+  h1,h2,h3{font-family:'Onest',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+    margin:0;letter-spacing:-0.022em;}
   .mono{font-family:'JetBrains Mono',ui-monospace,monospace;}
   .wrap{max-width:1200px;margin:0 auto;padding:0 32px;}
   .muted{color:var(--text-faint);font-size:0.9rem;}
@@ -170,8 +173,16 @@
   .u-btn-onband-ghost:hover{color:var(--band-text);border-color:var(--band-text);transform:translateY(-1px);}
   .u-btn-sm{height:40px;padding:0 18px;font-size:14.5px;border-radius:10px;}
 
-  .u-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:28px;
+  /* Карточка — не единственный приём. Рамка, заливка и тень стоят денег
+     внимания: если ими обвести всё подряд, иерархия схлопывается и страница
+     выглядит дёшево. .u-plain — блок без обводки, для перечислений;
+     .u-card — там, где объект действительно отдельный. */
+  .u-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;
+    box-shadow:0 1px 2px oklch(45% 0.04 245 / 0.05);
     transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;}
+  .u-plain{padding:26px 0 0;border-top:2px solid var(--text);}
+  .u-plain h3{font-size:18px;margin-bottom:9px;}
+  .u-plain p{font-size:15px;line-height:1.62;color:var(--text-dim);margin:0;}
   .u-card-lift:hover{transform:translateY(-3px);border-color:color-mix(in oklab, var(--brand) 45%, var(--border));
     box-shadow:0 22px 44px -28px var(--shadow-soft);}
 
