@@ -1,0 +1,49 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Как включить</h2>
+<p>
+  Передайте <code>"stream": true</code>. Ответ придёт потоком Server-Sent Events: каждая
+  порция — строка <code>data:</code> с фрагментом в формате OpenAI, а поток закрывается
+  строкой <code>data: [DONE]</code>.
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Terminal</span><button type="button" class="dx-copy">Копировать</button></div><pre>curl {{ features.api_base_url }}/v1/chat/completions \
+  -H "Authorization: Bearer $FLAWLESS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "{{ default_model }}",
+    "messages": [{"role": "user", "content": "Напиши хайку про биллинг"}],
+    "stream": true
+  }'</pre></div>
+
+<h2>Из Python</h2>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Python</span><button type="button" class="dx-copy">Копировать</button></div><pre>stream = client.chat.completions.create(
+    model="{{ default_model }}",
+    messages=[{"role": "user", "content": "Напиши хайку про биллинг"}],
+    stream=True,
+)
+
+for chunk in stream:
+    delta = chunk.choices[0].delta.content
+    if delta:
+        print(delta, end="", flush=True)</pre></div>
+
+<h2>Что происходит с деньгами при обрыве</h2>
+<p>
+  Если клиент закрыл соединение на середине ответа, вызов всё равно закрывается корректно:
+  списывается то, что успело сгенерироваться, остаток резерва возвращается на баланс.
+  Незавершённых «висящих» списаний не остаётся.
+</p>
+<div class="dx-note">
+  <p>
+    Это отдельно проверяется автотестом: обрыв соединения в потоковом режиме — не обычная
+    ошибка, и наивная обработка исключений его не ловит.
+  </p>
+</div>
+
+<h2>Ограничение</h2>
+<p>
+  Заголовок <code>Idempotency-Key</code> в потоковом режиме не действует: повторить поток
+  из сохранённого ответа невозможно. Для запросов, которые нельзя дублировать,
+  используйте обычный режим.
+</p>
+{% endblock %}

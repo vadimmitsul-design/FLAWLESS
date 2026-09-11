@@ -32,6 +32,7 @@ from app.models import (
     Customer,
     DialogueArchive,
     PasswordResetRequest,
+    PricingConfig,
     Product,
     InviteCode,
     Prompt,
@@ -74,6 +75,10 @@ class _FeatureFlags:
     @property
     def instance_name(self) -> str:
         return settings.instance_name
+
+    @property
+    def api_base_url(self) -> str:
+        return settings.public_base_url
 
     @property
     def enable_shop(self) -> bool:
@@ -139,7 +144,17 @@ async def lifespan(app: FastAPI):
         await reaper_task
 
 
-app = FastAPI(title="Flawless", lifespan=lifespan)
+# docs_url/redoc_url/openapi_url=None по двум причинам. Первая: адрес /docs
+# занят нашей собственной документацией для клиентов. Вторая: встроенная
+# схема FastAPI отдавалась анонимно и перечисляла ВСЕ маршруты, включая
+# выключенные флагами разделы (находка разбора 2026-09-08).
+app = FastAPI(
+    title="Flawless",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 app.add_middleware(CSRFOriginMiddleware)
 app.add_middleware(
     SessionMiddleware,
@@ -331,6 +346,152 @@ async def forgot_password_submit(
     return templates.TemplateResponse(request, "forgot_password.html", {"sent": True})
 
 
+# ---------- публичные страницы: лендинг и документация ----------
+
+_VENDOR_TITLES = {"openai": "OpenAI", "anthropic": "Anthropic", "gemini": "Google"}
+
+_MODEL_BLURBS = {
+    "gpt-5-mini": "Быстрые и недорогие ответы для основной массы запросов.",
+    "claude-sonnet": "Длинный контекст и задачи, где важна точность рассуждения.",
+    "gemini-flash": "Низкая задержка и самая низкая цена за миллион токенов.",
+}
+
+# (группа, адрес, заголовок, шаблон, подзаголовок)
+_DOCS_PAGES = [
+    ("Начало работы", "/docs", "Быстрый старт", "docs/quickstart.html",
+     "От регистрации до первого ответа модели — пять минут и один HTTP-запрос."),
+    ("Начало работы", "/docs/auth", "Аутентификация", "docs/auth.html",
+     "Как устроены API-ключи, что они ограничивают и как их отозвать."),
+    ("Начало работы", "/docs/models", "Модели и цены", "docs/models.html",
+     "Какие модели доступны, сколько стоит миллион токенов и что происходит при сбое провайдера."),
+    ("API", "/docs/chat-completions", "Chat Completions", "docs/chat_completions.html",
+     "Справочник параметров запроса, формата ответа и повторной отправки без двойного списания."),
+    ("API", "/docs/streaming", "Потоковые ответы", "docs/streaming.html",
+     "Ответ по мере генерации — и что при обрыве соединения происходит с деньгами."),
+    ("API", "/docs/limits", "Ошибки и лимиты", "docs/limits.html",
+     "Частота запросов, потолки расхода и полный список кодов ошибок."),
+    ("Оплата и контроль", "/docs/billing", "Баланс и списания", "docs/billing.html",
+     "Как рубли на балансе превращаются в вызовы и что сохраняется по каждому из них."),
+    ("Переход", "/docs/migration", "Миграция с OpenAI", "docs/migration.html",
+     "Что поменять в коде — и чего в сервисе пока нет."),
+]
+
+_DOCS_INDEX = {page[1]: i for i, page in enumerate(_DOCS_PAGES)}
+
+
+def _build_docs_nav() -> list[dict]:
+    """Меню собирается из того же списка, что и маршруты: страница не может
+    появиться в навигации, не имея обработчика, и наоборот."""
+    nav: list[dict] = []
+    for group, path, title, _template, _lead in _DOCS_PAGES:
+        if not nav or nav[-1]["title"] != group:
+            nav.append({"title": group, "items": []})
+        nav[-1]["items"].append({"path": path, "title": title})
+    return nav
+
+
+DOCS_NAV = _build_docs_nav()
+
+
+def _fmt_rub(value: Decimal) -> str:
+    """Разряды — неразрывным пробелом, чтобы цена не переносилась по строкам."""
+    return f"{value:,.0f}".replace(",", "\u00a0")
+
+
+async def _public_model_catalog(session: AsyncSession) -> tuple[list[dict], PricingConfig]:
+    """Каталог моделей с ценой в рублях для лендинга и документации.
+
+    Цена считается из той же таблицы и по той же формуле, что и реальное
+    списание (billing.price_in_rub) — иначе витрина и счёт разъехались бы,
+    а клиент узнавал бы настоящую цену только из истории вызовов.
+    """
+    cfg = await billing.get_pricing_config(session)
+    now = utcnow()
+    catalog: list[dict] = []
+    for alias in llm.known_models():
+        provider, model = llm.resolve_alias(alias)
+        price = await pricing.find_price(session, provider, model, None, None, now)
+        priced = price is not None and price.price_per_1m_input_tokens is not None
+        catalog.append(
+            {
+                "alias": alias,
+                "model": model,
+                "vendor": _VENDOR_TITLES.get(provider, provider),
+                "blurb": _MODEL_BLURBS.get(alias, "Доступна через тот же ключ и тот же баланс."),
+                "priced": priced,
+                "price_in": _fmt_rub(billing.price_in_rub(price.price_per_1m_input_tokens, cfg))
+                if priced
+                else "",
+                "price_out": _fmt_rub(
+                    billing.price_in_rub(price.price_per_1m_output_tokens or Decimal(0), cfg)
+                )
+                if priced
+                else "",
+            }
+        )
+    return catalog, cfg
+
+
+async def _public_page_context(session: AsyncSession) -> dict:
+    """Общий контекст лендинга и документации: живые цены вместо заглушек.
+
+    Наценка и курс раньше стояли на лендинге литералом «[НАЦЕНКА]%» —
+    страница врала бы клиенту в тот же день, когда админ поменяет прайс.
+    """
+    models, cfg = await _public_model_catalog(session)
+    return {
+        "customer": None,
+        "models": models,
+        # normalize() убирает хвостовые нули (30.00 -> 30), а ":f" не даёт ему
+        # свалиться в экспоненту: Decimal("30.00").normalize() это 3E+1.
+        "markup_percent": f"{cfg.markup_percent.normalize():f}",
+        "usd_rub_rate": f"{cfg.usd_rub_rate.normalize():f}",
+        "default_model": models[0]["alias"] if models else "gpt-5-mini",
+        "max_output_tokens_cap": settings.max_output_tokens_cap,
+        "rate_limit_per_window": settings.rate_limit_per_window,
+        "rate_limit_window_seconds": settings.rate_limit_window_seconds,
+    }
+
+
+async def _render_doc(request: Request, path: str, session: AsyncSession):
+    group, _path, title, template, lead = _DOCS_PAGES[_DOCS_INDEX[path]]
+    index = _DOCS_INDEX[path]
+    ctx = await _public_page_context(session)
+    ctx.update(
+        {
+            "docs_nav": DOCS_NAV,
+            "active_path": path,
+            "page_title": title,
+            "page_group": group,
+            "page_lead": lead,
+            "prev_page": (
+                {"path": _DOCS_PAGES[index - 1][1], "title": _DOCS_PAGES[index - 1][2]}
+                if index > 0
+                else None
+            ),
+            "next_page": (
+                {"path": _DOCS_PAGES[index + 1][1], "title": _DOCS_PAGES[index + 1][2]}
+                if index + 1 < len(_DOCS_PAGES)
+                else None
+            ),
+        }
+    )
+    return templates.TemplateResponse(request, template, ctx)
+
+
+@app.get("/docs")
+async def docs_index(request: Request, session: AsyncSession = Depends(get_session)):
+    return await _render_doc(request, "/docs", session)
+
+
+@app.get("/docs/{slug}")
+async def docs_page(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+    path = f"/docs/{slug}"
+    if path not in _DOCS_INDEX:
+        raise HTTPException(status_code=404)
+    return await _render_doc(request, path, session)
+
+
 # ---------- веб: кабинет ----------
 
 
@@ -341,7 +502,9 @@ async def dashboard(
     session: AsyncSession = Depends(get_session),
 ):
     if customer is None:
-        return templates.TemplateResponse(request, "landing.html", {"customer": None})
+        return templates.TemplateResponse(
+            request, "landing.html", await _public_page_context(session)
+        )
 
     api_keys = (
         await session.execute(

@@ -1,0 +1,56 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Что нужно поменять</h2>
+<p>
+  Ровно две вещи: адрес и ключ. Остальной код остаётся как есть — формат запроса и ответа
+  совпадает с OpenAI Chat Completions.
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Python</span><button type="button" class="dx-copy">Копировать</button></div><pre> client = OpenAI(
+-    api_key=os.environ["OPENAI_API_KEY"],
++    api_key=os.environ["FLAWLESS_API_KEY"],
++    base_url="{{ features.api_base_url }}/v1",
+ )</pre></div>
+
+<h2>Имена моделей</h2>
+<p>
+  Имена моделей OpenAI напрямую <strong>не</strong> принимаются — используется алиас сервиса.
+  Замену удобно спрятать в одну константу.
+</p>
+<div class="dx-table-wrap">
+<table>
+  <thead><tr><th>Алиас Flawless</th><th>Что за ним стоит</th></tr></thead>
+  <tbody>
+    {% for m in models %}
+    <tr><td><code>{{ m.alias }}</code></td><td>{{ m.vendor }} · <code>{{ m.model }}</code></td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Что поддержано</h2>
+<ul>
+  <li><code>chat.completions.create</code> — обычный и потоковый режим;</li>
+  <li>параметры <code>temperature</code>, <code>top_p</code>, <code>max_tokens</code>, <code>stop</code>, <code>response_format</code>, <code>tools</code>, <code>tool_choice</code>, <code>seed</code> и другие из <a href="/docs/chat-completions">справочника</a>;</li>
+  <li>заголовок <code>Idempotency-Key</code> — у OpenAI его нет, но он спасает от двойного списания при повторе.</li>
+</ul>
+
+<h2>Чего пока нет</h2>
+<p>Честный список, чтобы вы не потратили время на отладку того, что не реализовано:</p>
+<ul>
+  <li><code>/v1/models</code> — списка моделей через API нет, он есть только на <a href="/docs/models">этой странице</a>;</li>
+  <li><code>/v1/embeddings</code>, <code>/v1/completions</code>, генерация изображений и звука;</li>
+  <li>загрузка файлов и веб-поиск на стороне сервиса.</li>
+</ul>
+<div class="dx-note warn">
+  <p>
+    Программы, которые при подключении сами запрашивают список моделей, каталог автоматически
+    не увидят — в них имя модели указывается вручную.
+  </p>
+</div>
+
+<h2>Проверка после переключения</h2>
+<p>
+  Сделайте один запрос и загляните в историю вызовов в кабинете: там должны появиться модель,
+  число токенов и сумма списания. Если запись есть — интеграция работает.
+</p>
+{% endblock %}

@@ -16,47 +16,58 @@
 </script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
+  /* Светлая тема — основная (фирменные цвета: синий + белый).
+     Тёмная остаётся переключателем, а не значением по умолчанию:
+     публичный сайт и документация должны открываться светлыми. */
   :root{
-    --bg:oklch(16% 0.020 262);
-    --bg-2:oklch(19% 0.022 262);
-    --surface:oklch(22% 0.022 262);
-    --surface-hi:oklch(26% 0.024 262);
-    --border:oklch(32% 0.02 262);
-    --text:oklch(96% 0.008 262);
-    --text-dim:oklch(74% 0.02 262);
-    --text-faint:oklch(55% 0.018 262);
-    --accent:oklch(66% 0.19 291);
-    --accent-hi:oklch(74% 0.17 291);
-    --accent-2:oklch(66% 0.19 191);
-    --warn:oklch(78% 0.15 85);
-    --bad:oklch(68% 0.18 25);
-    --badge-ok-bg:oklch(66% 0.19 191 / 0.16);
-    --badge-warn-bg:oklch(78% 0.15 85 / 0.16);
-    --badge-bad-bg:oklch(68% 0.18 25 / 0.16);
-    --badge-role-bg:oklch(66% 0.19 291 / 0.16);
-    --btn-on-accent:oklch(15% 0.02 291);
-    --shadow-soft:oklch(10% 0 0 / 0.6);
-  }
-  :root[data-theme="light"]{
-    --bg:oklch(97% 0.008 262);
-    --bg-2:oklch(94% 0.010 262);
-    --surface:oklch(99% 0.004 262);
-    --surface-hi:oklch(95% 0.012 262);
-    --border:oklch(85% 0.014 262);
-    --text:oklch(22% 0.02 262);
-    --text-dim:oklch(42% 0.02 262);
-    --text-faint:oklch(58% 0.016 262);
-    --accent:oklch(52% 0.20 291);
-    --accent-hi:oklch(46% 0.20 291);
-    --accent-2:oklch(46% 0.15 191);
+    --bg:oklch(99% 0.003 255);
+    --bg-2:oklch(96.5% 0.008 255);
+    --surface:oklch(100% 0 0);
+    --surface-hi:oklch(97% 0.008 255);
+    --border:oklch(90% 0.013 255);
+    --text:oklch(21% 0.021 258);
+    --text-dim:oklch(45% 0.020 258);
+    --text-faint:oklch(60% 0.016 258);
+    --accent:oklch(52% 0.20 258);
+    --accent-hi:oklch(45% 0.20 258);
+    --accent-2:oklch(56% 0.14 233);
+    --accent-wash:oklch(52% 0.20 258 / 0.08);
     --warn:oklch(55% 0.16 85);
     --bad:oklch(52% 0.20 25);
-    --badge-ok-bg:oklch(46% 0.15 191 / 0.14);
+    --badge-ok-bg:oklch(56% 0.14 233 / 0.14);
     --badge-warn-bg:oklch(55% 0.16 85 / 0.14);
     --badge-bad-bg:oklch(52% 0.20 25 / 0.14);
-    --badge-role-bg:oklch(52% 0.20 291 / 0.14);
-    --btn-on-accent:oklch(99% 0.004 262);
-    --shadow-soft:oklch(60% 0.02 262 / 0.22);
+    --badge-role-bg:oklch(52% 0.20 258 / 0.12);
+    --btn-on-accent:oklch(100% 0 0);
+    --shadow-soft:oklch(55% 0.03 258 / 0.16);
+    --code-bg:oklch(21% 0.021 258);
+    --code-text:oklch(93% 0.010 255);
+    --code-border:oklch(30% 0.022 258);
+  }
+  :root[data-theme="dark"]{
+    --bg:oklch(16% 0.020 258);
+    --bg-2:oklch(19% 0.022 258);
+    --surface:oklch(22% 0.022 258);
+    --surface-hi:oklch(26% 0.024 258);
+    --border:oklch(32% 0.020 258);
+    --text:oklch(96% 0.008 258);
+    --text-dim:oklch(74% 0.020 258);
+    --text-faint:oklch(55% 0.018 258);
+    --accent:oklch(68% 0.17 258);
+    --accent-hi:oklch(77% 0.13 258);
+    --accent-2:oklch(72% 0.13 233);
+    --accent-wash:oklch(68% 0.17 258 / 0.14);
+    --warn:oklch(78% 0.15 85);
+    --bad:oklch(68% 0.18 25);
+    --badge-ok-bg:oklch(72% 0.13 233 / 0.16);
+    --badge-warn-bg:oklch(78% 0.15 85 / 0.16);
+    --badge-bad-bg:oklch(68% 0.18 25 / 0.16);
+    --badge-role-bg:oklch(68% 0.17 258 / 0.16);
+    --btn-on-accent:oklch(16% 0.020 258);
+    --shadow-soft:oklch(10% 0 0 / 0.6);
+    --code-bg:oklch(13% 0.018 258);
+    --code-text:oklch(90% 0.012 255);
+    --code-border:oklch(28% 0.020 258);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
@@ -102,11 +113,12 @@
   code{font-family:'JetBrains Mono';background:var(--surface-hi);border:1px solid var(--border);padding:0.2rem 0.5rem;border-radius:6px;font-size:0.9em;word-break:break-all;}
   .row{display:flex;gap:0.75rem;align-items:center;}
   .logo{display:flex;align-items:center;gap:9px;}
-  .logo svg{width:22px;height:22px;stroke:var(--accent-hi);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
-  .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;font-style:italic;letter-spacing:-0.01em;color:var(--accent-2);}
+  .logo svg{width:22px;height:22px;stroke:var(--accent);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
+  .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;font-style:italic;letter-spacing:-0.01em;color:var(--accent);}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent-hi);flex-shrink:0;}
   .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
 </style>
+{% block head %}{% endblock %}
 </head>
 <body>
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
@@ -151,12 +163,12 @@
 {% block content %}{% endblock %}
 <script>
 function applyThemeIcon(){
-  var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  var isLight = document.documentElement.getAttribute('data-theme') !== 'dark';
   document.querySelectorAll('.theme-toggle').forEach(function(b){ b.textContent = isLight ? '🌙' : '☀️'; });
 }
 function toggleTheme(){
   var root = document.documentElement;
-  var current = root.getAttribute('data-theme') || 'dark';
+  var current = root.getAttribute('data-theme') || 'light';
   var next = current === 'dark' ? 'light' : 'dark';
   root.setAttribute('data-theme', next);
   try { localStorage.setItem('theme', next); } catch (e) {}

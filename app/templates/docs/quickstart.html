@@ -1,0 +1,67 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Что нужно перед стартом</h2>
+<ul>
+  <li>аккаунт в Flawless — регистрация занимает минуту;</li>
+  <li>API-ключ — выпускается в личном кабинете;</li>
+  <li>положительный баланс — списание идёт по факту использованных токенов.</li>
+</ul>
+
+<h2>Шаг 1. Получить ключ</h2>
+<p>
+  Зайдите в <a href="/">личный кабинет</a> и выпустите ключ. Ключ вида
+  <code>nh_&hellip;</code> показывается <strong>один раз</strong> — сервис хранит только его хэш
+  и восстановить значение не может. Потеряли — выпустите новый, старый отзовите.
+</p>
+
+<h2>Шаг 2. Пополнить баланс</h2>
+<p>
+  Баланс ведётся в рублях. Пока приём карт не подключён, пополнение проходит через заявку:
+  вы указываете сумму, переводите деньги, администратор подтверждает поступление.
+  Подробно — в разделе <a href="/docs/billing">Баланс и списания</a>.
+</p>
+
+<h2>Шаг 3. Первый запрос</h2>
+<p>
+  Базовый адрес — <code>{{ features.api_base_url }}/v1</code>. Метод совместим с
+  OpenAI Chat Completions, поэтому подойдут официальные SDK: достаточно подменить
+  <code>base_url</code> и ключ.
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Terminal</span><button type="button" class="dx-copy">Копировать</button></div><pre>curl {{ features.api_base_url }}/v1/chat/completions \
+  -H "Authorization: Bearer $FLAWLESS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "{{ default_model }}",
+    "messages": [
+      {"role": "user", "content": "Объясни, что такое идемпотентность"}
+    ]
+  }'</pre></div>
+<p>Тот же запрос из Python:</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">Python</span><button type="button" class="dx-copy">Копировать</button></div><pre>from openai import OpenAI
+
+client = OpenAI(
+    api_key="nh_&hellip;",
+    base_url="{{ features.api_base_url }}/v1",
+)
+
+response = client.chat.completions.create(
+    model="{{ default_model }}",
+    messages=[{"role": "user", "content": "Объясни, что такое идемпотентность"}],
+)
+print(response.choices[0].message.content)</pre></div>
+
+<div class="dx-note">
+  <p>
+    <strong>Ключ — в переменную окружения, не в код.</strong> Ключ даёт доступ к вашему балансу:
+    попав в репозиторий, он позволит тратить ваши деньги. Отозвать ключ можно в кабинете в любой момент.
+  </p>
+</div>
+
+<h2>Что дальше</h2>
+<div class="dx-cards">
+  <a class="dx-card" href="/docs/models"><b>Модели и цены</b><span>Какие модели доступны и сколько стоит миллион токенов</span></a>
+  <a class="dx-card" href="/docs/chat-completions"><b>Chat Completions</b><span>Справочник параметров запроса и ответа</span></a>
+  <a class="dx-card" href="/docs/streaming"><b>Потоковые ответы</b><span>Как получать ответ по мере генерации</span></a>
+  <a class="dx-card" href="/docs/limits"><b>Ошибки и лимиты</b><span>Коды ответов, частота запросов, потолки расхода</span></a>
+</div>
+{% endblock %}

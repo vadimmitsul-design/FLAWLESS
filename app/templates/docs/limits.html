@@ -1,0 +1,55 @@
+{% extends "docs_base.html" %}
+{% block doc %}
+<h2>Ограничение частоты</h2>
+<p>
+  На каждый ключ действует ограничение <strong>{{ rate_limit_per_window }} запросов
+  за {{ rate_limit_window_seconds }} секунд</strong>. Превышение возвращает <code>429</code>
+  с типом <code>rate_limit_error</code>. Ограничение применяется и к API, и к веб-чату, и к Telegram.
+</p>
+
+<h2>Потолки расхода</h2>
+<p>
+  Кроме частоты есть денежные потолки — дневной и месячный. Они существуют на двух уровнях:
+  на аккаунте целиком и отдельно на каждом ключе. Проверяются оба, и превышение любого
+  останавливает запрос <strong>до</strong> обращения к провайдеру.
+</p>
+<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">JSON</span><button type="button" class="dx-copy">Копировать</button></div><pre>{
+  "error": {
+    "message": "daily spend limit exceeded for this key",
+    "type": "spend_limit_exceeded",
+    "scope": "key",
+    "limit_rub": "500.0000",
+    "spent_rub": "500.1300"
+  }
+}</pre></div>
+
+<h2>Полный список ошибок</h2>
+<div class="dx-table-wrap">
+<table>
+  <thead><tr><th>Код</th><th>type</th><th>Что значит</th><th>Что делать</th></tr></thead>
+  <tbody>
+    <tr><td><code>401</code></td><td><code>invalid_request_error</code></td><td>Ключ отсутствует, отозван или аккаунт отключён</td><td>Проверить заголовок и ключ</td></tr>
+    <tr><td><code>402</code></td><td><code>insufficient_quota</code></td><td>Не хватает баланса с учётом зарезервированных сумм</td><td>Пополнить баланс; остаток есть в поле <code>balance_rub</code></td></tr>
+    <tr><td><code>404</code></td><td><code>invalid_request_error</code></td><td>Неизвестный алиас модели или <code>prompt_id</code></td><td>Сверить со списком моделей</td></tr>
+    <tr><td><code>409</code></td><td><code>idempotency_key_reused</code></td><td>Тот же <code>Idempotency-Key</code> с другим телом запроса</td><td>Использовать новый ключ</td></tr>
+    <tr><td><code>409</code></td><td><code>idempotency_conflict</code></td><td>Два параллельных запроса с одним ключом</td><td>Повторить тот же запрос с тем же ключом</td></tr>
+    <tr><td><code>429</code></td><td><code>rate_limit_error</code></td><td>Превышена частота запросов</td><td>Снизить темп, повторить с задержкой</td></tr>
+    <tr><td><code>429</code></td><td><code>spend_limit_exceeded</code></td><td>Превышен дневной или месячный потолок</td><td>Поднять лимит или дождаться следующего периода</td></tr>
+    <tr><td><code>503</code></td><td><code>model_not_priced</code></td><td>Для модели нет действующей цены</td><td>Выбрать другую модель, сообщить администратору</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2>Как повторять запросы</h2>
+<p>
+  На <code>429</code> и <code>503</code> повтор имеет смысл — с нарастающей задержкой.
+  На <code>401</code>, <code>402</code> и <code>404</code> повторять бесполезно: пока не
+  изменится ключ, баланс или имя модели, ответ будет тем же.
+</p>
+<div class="dx-note">
+  <p>
+    Если повторяете запрос, который мог уже выполниться, отправляйте его с прежним
+    <code>Idempotency-Key</code> — тогда второго списания не будет.
+  </p>
+</div>
+{% endblock %}
