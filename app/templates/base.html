@@ -16,58 +16,63 @@
 </script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
-  /* Светлая тема — основная (фирменные цвета: синий + белый).
-     Тёмная остаётся переключателем, а не значением по умолчанию:
-     публичный сайт и документация должны открываться светлыми. */
+  /* Фирменные цвета сняты с логотипа: #3E8CB8 — мягкий стальной синий с
+     уходом в циан, а не насыщенный королевский.
+     --brand    — точный цвет логотипа, для вордмарка и знака;
+     --accent   — он же, но темнее: на кнопках и ссылках нужен контраст не
+                  ниже 4.5:1 к белому, а сам фирменный слишком светлый (3.3:1).
+     Светлая тема основная: публичный сайт и документация открываются светлыми. */
   :root{
-    --bg:oklch(99% 0.003 255);
-    --bg-2:oklch(96.5% 0.008 255);
+    --bg:oklch(97.4% 0.002 250);
+    --bg-2:oklch(95.6% 0.004 245);
     --surface:oklch(100% 0 0);
-    --surface-hi:oklch(97% 0.008 255);
-    --border:oklch(90% 0.013 255);
-    --text:oklch(21% 0.021 258);
-    --text-dim:oklch(45% 0.020 258);
-    --text-faint:oklch(60% 0.016 258);
-    --accent:oklch(52% 0.20 258);
-    --accent-hi:oklch(45% 0.20 258);
-    --accent-2:oklch(56% 0.14 233);
-    --accent-wash:oklch(52% 0.20 258 / 0.08);
+    --surface-hi:oklch(96.6% 0.005 245);
+    --border:oklch(89.5% 0.008 245);
+    --text:oklch(22% 0.015 245);
+    --text-dim:oklch(46% 0.014 245);
+    --text-faint:oklch(61% 0.012 245);
+    --brand:oklch(61% 0.101 237);
+    --accent:oklch(54% 0.111 237);
+    --accent-hi:oklch(46% 0.115 237);
+    --accent-2:oklch(66% 0.080 222);
+    --accent-wash:oklch(61% 0.101 237 / 0.10);
     --warn:oklch(55% 0.16 85);
     --bad:oklch(52% 0.20 25);
-    --badge-ok-bg:oklch(56% 0.14 233 / 0.14);
+    --badge-ok-bg:oklch(66% 0.080 222 / 0.16);
     --badge-warn-bg:oklch(55% 0.16 85 / 0.14);
     --badge-bad-bg:oklch(52% 0.20 25 / 0.14);
-    --badge-role-bg:oklch(52% 0.20 258 / 0.12);
+    --badge-role-bg:oklch(61% 0.101 237 / 0.14);
     --btn-on-accent:oklch(100% 0 0);
-    --shadow-soft:oklch(55% 0.03 258 / 0.16);
-    --code-bg:oklch(21% 0.021 258);
-    --code-text:oklch(93% 0.010 255);
-    --code-border:oklch(30% 0.022 258);
+    --shadow-soft:oklch(55% 0.02 245 / 0.18);
+    --code-bg:oklch(23% 0.020 245);
+    --code-text:oklch(93% 0.008 245);
+    --code-border:oklch(31% 0.020 245);
   }
   :root[data-theme="dark"]{
-    --bg:oklch(16% 0.020 258);
-    --bg-2:oklch(19% 0.022 258);
-    --surface:oklch(22% 0.022 258);
-    --surface-hi:oklch(26% 0.024 258);
-    --border:oklch(32% 0.020 258);
-    --text:oklch(96% 0.008 258);
-    --text-dim:oklch(74% 0.020 258);
-    --text-faint:oklch(55% 0.018 258);
-    --accent:oklch(68% 0.17 258);
-    --accent-hi:oklch(77% 0.13 258);
-    --accent-2:oklch(72% 0.13 233);
-    --accent-wash:oklch(68% 0.17 258 / 0.14);
+    --bg:oklch(17% 0.016 245);
+    --bg-2:oklch(20% 0.018 245);
+    --surface:oklch(23% 0.018 245);
+    --surface-hi:oklch(27% 0.020 245);
+    --border:oklch(33% 0.018 245);
+    --text:oklch(96% 0.006 245);
+    --text-dim:oklch(74% 0.016 245);
+    --text-faint:oklch(56% 0.014 245);
+    --brand:oklch(72% 0.100 237);
+    --accent:oklch(72% 0.100 237);
+    --accent-hi:oklch(80% 0.080 237);
+    --accent-2:oklch(77% 0.075 222);
+    --accent-wash:oklch(72% 0.100 237 / 0.16);
     --warn:oklch(78% 0.15 85);
     --bad:oklch(68% 0.18 25);
-    --badge-ok-bg:oklch(72% 0.13 233 / 0.16);
+    --badge-ok-bg:oklch(77% 0.075 222 / 0.16);
     --badge-warn-bg:oklch(78% 0.15 85 / 0.16);
     --badge-bad-bg:oklch(68% 0.18 25 / 0.16);
-    --badge-role-bg:oklch(68% 0.17 258 / 0.16);
-    --btn-on-accent:oklch(16% 0.020 258);
+    --badge-role-bg:oklch(72% 0.100 237 / 0.18);
+    --btn-on-accent:oklch(17% 0.016 245);
     --shadow-soft:oklch(10% 0 0 / 0.6);
-    --code-bg:oklch(13% 0.018 258);
-    --code-text:oklch(90% 0.012 255);
-    --code-border:oklch(28% 0.020 258);
+    --code-bg:oklch(14% 0.014 245);
+    --code-text:oklch(90% 0.010 245);
+    --code-border:oklch(28% 0.018 245);
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--bg);color:var(--text);font-family:'Manrope',ui-sans-serif,system-ui,sans-serif;}
@@ -113,8 +118,8 @@
   code{font-family:'JetBrains Mono';background:var(--surface-hi);border:1px solid var(--border);padding:0.2rem 0.5rem;border-radius:6px;font-size:0.9em;word-break:break-all;}
   .row{display:flex;gap:0.75rem;align-items:center;}
   .logo{display:flex;align-items:center;gap:9px;}
-  .logo svg{width:22px;height:22px;stroke:var(--accent);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
-  .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:800;font-style:italic;letter-spacing:-0.01em;color:var(--accent);}
+  .logo svg{width:22px;height:22px;stroke:var(--brand);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
+  .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:900;font-style:italic;letter-spacing:-0.02em;color:var(--brand);}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent-hi);flex-shrink:0;}
   .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
 </style>
