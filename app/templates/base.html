@@ -14,7 +14,7 @@
   } catch (e) {}
 })();
 </script>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Onest:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
   /* Фирменные цвета сняты с логотипа: #3E8CB8 — мягкий стальной синий с
      уходом в циан, а не насыщенный королевский.
@@ -46,6 +46,7 @@
     --shadow-soft:oklch(45% 0.04 245 / 0.22);
     --code-bg:oklch(23% 0.020 245);
     --code-text:oklch(93% 0.008 245);
+    --gold:oklch(62% 0.115 78);
     --code-border:oklch(31% 0.020 245);
     --band:oklch(18% 0.048 249);
     --band-2:oklch(23% 0.050 249);
@@ -77,6 +78,7 @@
     --shadow-soft:oklch(10% 0 0 / 0.6);
     --code-bg:oklch(14% 0.014 245);
     --code-text:oklch(90% 0.010 245);
+    --gold:oklch(84% 0.115 82);
     --code-border:oklch(28% 0.018 245);
     --band:oklch(15% 0.026 247);
     --band-2:oklch(20% 0.030 247);
@@ -137,7 +139,80 @@
   .logo{display:flex;align-items:center;gap:9px;}
   .logo svg{width:22px;height:22px;stroke:var(--brand);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;}
   .wordmark{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:900;font-style:italic;letter-spacing:-0.02em;color:var(--brand);}
+  .surface-dark .wordmark{background:linear-gradient(92deg,var(--accent-hi),var(--accent-2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
   .avatar{width:32px;height:32px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:var(--accent-hi);flex-shrink:0;}
+
+  /* ─────────── витрина: всегда тёмная ───────────
+     Концепт, который утвердил заказчик, построен на тёмном зале, где светится
+     только важное — деньги и поток вызовов. В светлой теме этот эффект
+     не воспроизводится вовсе, поэтому публичные страницы к переключателю
+     тем не привязаны: они всегда тёмные.
+
+     Токены переопределяются НА ОБЁРТКЕ, а не на :root — кабинет и
+     документация продолжают слушаться выбора пользователя. Все компоненты
+     ходят через var(), поэтому переопределения хватает. */
+  .surface-dark{
+    --bg:oklch(13% 0.020 250);
+    --bg-2:oklch(16% 0.024 250);
+    --surface:oklch(18.5% 0.026 250);
+    --surface-hi:oklch(23% 0.030 250);
+    --border:oklch(27% 0.028 250);
+    --text:oklch(95% 0.010 245);
+    --text-dim:oklch(74% 0.020 245);
+    --text-faint:oklch(56% 0.020 245);
+    --brand:oklch(74% 0.105 237);
+    --accent:oklch(74% 0.105 237);
+    --accent-hi:oklch(83% 0.085 237);
+    --accent-2:oklch(84% 0.105 180);
+    --accent-wash:oklch(74% 0.105 237 / 0.14);
+    --gold:oklch(86% 0.110 82);
+    --btn-on-accent:oklch(17% 0.040 245);
+    --shadow-soft:oklch(0% 0 0 / 0.7);
+    --band:oklch(11% 0.018 250);
+    --band-2:oklch(16% 0.024 250);
+    --band-line:oklch(28% 0.030 250);
+    background:var(--bg);
+    color:var(--text);
+    min-height:100vh;
+  }
+  /* Фон самой страницы — иначе за обёрткой просвечивала бы светлая тема. */
+  body:has(> .surface-dark){background:oklch(13% 0.020 250);}
+  /* На витрине переключатель тем не нужен: она тёмная по замыслу, и кнопка
+     там просто ничего не делала бы. */
+  body:has(> .surface-dark) .theme-toggle{display:none;}
+
+  /* Акцидентный шрифт витрины. В кабинете он не нужен: там читают цифры,
+     а не заголовки. */
+  .surface-dark h1,.surface-dark h2,.surface-dark .u-h2,.surface-dark .u-pagehead h1{
+    font-family:'Unbounded',ui-sans-serif,system-ui,sans-serif;
+    font-weight:700;letter-spacing:-0.038em;}
+
+  /* Деньги — золотом. Единственное место, где палитра уходит от синего:
+     цифра расхода должна читаться первой. */
+  .u-money{color:var(--gold) !important;font-variant-numeric:tabular-nums;
+    font-family:'JetBrains Mono',ui-monospace,monospace;letter-spacing:-0.03em;}
+
+  /* Панель с градиентной кромкой — приём из концепта: рамка не рисуется
+     бордюром, а проступает подложкой в один пиксель. */
+  .u-rim{position:relative;border-radius:22px;padding:1px;
+    background:linear-gradient(150deg,
+      color-mix(in oklab, var(--accent) 55%, transparent),
+      color-mix(in oklab, var(--accent-2) 18%, transparent) 42%,
+      color-mix(in oklab, var(--border) 90%, transparent));
+    box-shadow:0 50px 100px -50px oklch(0% 0 0 / 0.9);}
+  .u-rim > *{background:linear-gradient(170deg,var(--surface),var(--bg-2));
+    border-radius:21px;}
+
+  /* Подсветка под курсором. Координаты ставит скрипт; без него карточка
+     просто остаётся обычной. */
+  .u-lit{position:relative;overflow:hidden;}
+  .u-lit::before{content:"";position:absolute;inset:0;opacity:0;transition:opacity .3s ease;
+    pointer-events:none;
+    background:radial-gradient(420px 200px at var(--mx,50%) var(--my,0%),
+      color-mix(in oklab, var(--accent) 22%, transparent), transparent 70%);}
+  .u-lit:hover::before{opacity:1;}
+  .u-lit > *{position:relative;}
 
   /* ─────────── общий слой компонентов публичных страниц ───────────
      Живёт здесь, а не в каждом шаблоне: лендинг, страницы продукта и
@@ -154,7 +229,7 @@
 
   .u-kicker{display:block;font-size:12.5px;font-weight:800;letter-spacing:0.11em;
     text-transform:uppercase;color:var(--accent);}
-  .u-h2{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+  .u-h2{font-family:'Onest',ui-sans-serif,system-ui,sans-serif;font-weight:700;
     font-size:clamp(28px,3.6vw,40px);line-height:1.1;letter-spacing:-0.022em;margin:14px 0 0;}
   .u-lead{font-size:17.5px;line-height:1.62;color:var(--text-dim);margin:16px 0 0;max-width:60ch;}
 
@@ -265,7 +340,7 @@
 
   /* герой внутренних страниц */
   .u-pagehead{padding:74px 0 58px;border-bottom:1px solid var(--border);background:var(--bg-2);}
-  .u-pagehead h1{font-family:'Nunito',ui-sans-serif,system-ui,sans-serif;font-weight:700;
+  .u-pagehead h1{font-family:'Onest',ui-sans-serif,system-ui,sans-serif;font-weight:700;
     font-size:clamp(32px,4.6vw,50px);line-height:1.06;letter-spacing:-0.028em;margin:14px 0 0;
     text-wrap:balance;max-width:19ch;}
   .u-pagehead p{font-size:19px;line-height:1.6;color:var(--text-dim);margin:20px 0 0;max-width:58ch;}
@@ -434,6 +509,20 @@ applyThemeIcon();
     document.documentElement.classList.remove('js-reveal');
     items.forEach(function(el){ el.classList.add('is-in'); });
   }, 1100);
+})();
+
+// Подсветка карточек под курсором. Координаты пишем в переменные CSS —
+// без скрипта карточка просто остаётся обычной, ничего не ломается.
+(function(){
+  var lit = document.querySelectorAll('.u-lit');
+  if (!lit.length || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  lit.forEach(function(el){
+    el.addEventListener('pointermove', function(e){
+      var r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+      el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+    });
+  });
 })();
 
 // Выпадающее меню на <details>: работает и без скрипта, но само не

@@ -23,11 +23,13 @@
     color:var(--band-text);font-size:13.5px;font-weight:600;}
   .hero-badge i{width:7px;height:7px;border-radius:50%;background:var(--accent-2);font-style:normal;}
 
-  .hero h1{font-family:'Onest',ui-sans-serif,system-ui,sans-serif;font-weight:700;
-    font-size:clamp(38px,5.6vw,64px);line-height:1.03;letter-spacing:-0.033em;margin:28px 0 0;
-    text-wrap:balance;max-width:17ch;}
-  .hero h1 em{font-family:'Nunito',sans-serif;font-style:italic;font-weight:900;color:var(--accent-2);
-    letter-spacing:-0.03em;}
+  .hero h1{font-family:'Unbounded',ui-sans-serif,system-ui,sans-serif;font-weight:800;
+    font-size:clamp(34px,5vw,62px);line-height:1.02;letter-spacing:-0.045em;margin:26px 0 0;
+    text-wrap:balance;max-width:15ch;}
+  /* Вторая фраза — градиентом: это и есть обещание сервиса, на неё смотрят. */
+  .hero h1 em{font-style:normal;
+    background:linear-gradient(94deg,var(--accent-hi) 8%,var(--accent-2));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
   .hero p.sub{font-size:19.5px;line-height:1.6;color:var(--band-dim);max-width:52ch;margin:24px 0 0;}
   .hero-cta{display:flex;gap:14px;margin-top:36px;flex-wrap:wrap;}
 
@@ -37,38 +39,41 @@
   .trust b{color:var(--band-text);font-weight:700;}
 
   /* ─── панель продукта в герое ───
-     Раньше здесь висел один чат-пузырь. Продаём мы не чат, а видимый до
-     копейки расход, — панель показывает именно это: остаток, динамику и
-     цену каждого вызова. */
-  .panel{background:var(--band-2);border:1px solid var(--band-line);border-radius:20px;
-    overflow:hidden;box-shadow:0 50px 90px -50px oklch(0% 0 0 / 0.85);}
+     Утверждённый концепт: тёмный зал, в котором светятся деньги и поток.
+     Рамка — не бордюр, а подложка в пиксель (.u-rim), суммы — золотом. */
+  #flow{position:absolute;inset:0;width:100%;height:100%;display:block;z-index:0;}
+  .hero .u-wrap{position:relative;z-index:2;}
+
+  .panel-in{padding:26px;}
   .panel-top{display:flex;align-items:center;justify-content:space-between;gap:12px;
-    padding:15px 20px;border-bottom:1px solid var(--band-line);}
-  .panel-top b{font-size:13.5px;font-weight:700;color:var(--band-text);}
-  .panel-live{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;letter-spacing:0.06em;
+    padding-bottom:16px;border-bottom:1px solid var(--band-line);margin-bottom:20px;}
+  .panel-top b{font-size:13.5px;font-weight:700;}
+  .panel-live{display:inline-flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.07em;
     text-transform:uppercase;color:var(--accent-2);font-weight:700;}
   .panel-live i{width:6px;height:6px;border-radius:50%;background:var(--accent-2);font-style:normal;
-    box-shadow:0 0 0 0 var(--accent-2);animation:pulse 2.4s ease-out infinite;}
-  @keyframes pulse{70%{box-shadow:0 0 0 7px oklch(66% 0.080 222 / 0);}100%{box-shadow:0 0 0 0 oklch(66% 0.080 222 / 0);}}
+    animation:pulse 2.6s ease-out infinite;}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 var(--accent-2);}70%{box-shadow:0 0 0 8px transparent;}
+    100%{box-shadow:0 0 0 0 transparent;}}
 
-  .panel-bal{padding:22px 20px 6px;}
-  .panel-bal .cap{font-size:12px;letter-spacing:0.07em;text-transform:uppercase;color:var(--band-dim);}
-  .panel-bal .sum{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:38px;
-    font-weight:600;letter-spacing:-0.035em;font-variant-numeric:tabular-nums;margin-top:6px;
-    color:var(--band-text);line-height:1;}
-  .panel-bal .sub{display:block;font-size:13px;color:var(--band-dim);margin-top:9px;}
+  .panel-cap{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-faint);}
+  .panel-sum{font-size:clamp(34px,4.6vw,46px);font-weight:600;line-height:1;margin-top:10px;
+    text-shadow:0 0 44px color-mix(in oklab, var(--gold) 30%, transparent);}
+  .panel-sub{font-size:13px;color:var(--text-dim);margin-top:10px;}
+  .panel-spark{display:block;width:100%;height:60px;margin-top:20px;}
 
-  .panel-chart{display:block;width:100%;height:84px;}
-  .panel-axis{display:flex;justify-content:space-between;padding:0 20px 16px;
-    font-size:11.5px;color:var(--band-dim);}
-
-  .panel-rows{border-top:1px solid var(--band-line);}
-  .panel-row{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:baseline;
-    padding:11px 20px;border-bottom:1px solid var(--band-line);}
-  .panel-row:last-child{border-bottom:none;}
-  .panel-row .m{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12.5px;color:var(--band-dim);}
-  .panel-row .v{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13.5px;font-weight:600;
-    font-variant-numeric:tabular-nums;color:var(--band-text);}
+  .streams{display:grid;gap:8px;margin-top:18px;}
+  .stream{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;
+    padding:11px 13px;border-radius:12px;border:1px solid transparent;
+    background:color-mix(in oklab, var(--text) 4%, transparent);
+    transition:border-color .18s ease, background .18s ease, transform .18s ease;}
+  .stream:hover{border-color:var(--band-line);transform:translateX(2px);
+    background:color-mix(in oklab, var(--text) 8%, transparent);}
+  .stream .dot{width:9px;height:9px;border-radius:50%;}
+  .stream .who{font-size:14px;font-weight:600;}
+  .stream .who small{display:block;color:var(--text-faint);font-size:11.5px;
+    font-family:'JetBrains Mono',ui-monospace,monospace;font-weight:400;margin-top:2px;}
+  .stream .amt{font-size:13.5px;}
+  .panel-note{font-size:11.5px;color:var(--text-faint);margin:14px 0 0;line-height:1.5;}
 
   /* ─── демонстрация чата ─── */
   .demo{background:var(--band);border:1px solid var(--band-line);border-radius:20px;overflow:hidden;
@@ -177,18 +182,21 @@
 {% endblock %}
 
 {% block content %}
+<div class="surface-dark">
 
 {% include "_public_nav.html" %}
 
 <section class="hero u-band">
+  <canvas id="flow" aria-hidden="true"></canvas>
   <div class="u-wrap">
     <div class="hero-grid">
       <div>
         <span class="hero-badge"><i></i>OpenAI-совместимый API · оплата в рублях</span>
-        <h1>Все модели — на одном <em>безупречном</em> балансе</h1>
+        <h1>Три поставщика.<br/><em>Один баланс.</em></h1>
         <p class="sub">
-          GPT, Claude и Gemini через один ключ. Пополняете рублями, платите за использованные
-          токены и видите стоимость каждого вызова до копейки. Без подписок, без валютной карты, без VPN.
+          Запросы уходят к OpenAI, Anthropic и Google, а деньги списываются из одного
+          рублёвого кошелька — по факту использованных токенов, до копейки.
+          Без подписок, без валютной карты, без VPN.
         </p>
         <div class="hero-cta">
           <a href="/signup" class="u-btn u-btn-onband">Получить API-ключ</a>
@@ -196,37 +204,48 @@
         </div>
       </div>
 
-      <div class="panel">
-        <div class="panel-top">
-          <b>Расход за две недели</b>
-          <span class="panel-live"><i></i>считается на лету</span>
-        </div>
+      <div class="u-rim">
+        <div class="panel-in">
+          <div class="panel-top">
+            <b>Списано сегодня</b>
+            <span class="panel-live"><i></i>считается на лету</span>
+          </div>
 
-        <div class="panel-bal">
-          <span class="cap">Баланс</span>
-          <span class="sum">4&nbsp;812,66&nbsp;₽</span>
-          <span class="sub">списано за 14 дней — 742,10 ₽ по 1 284 вызовам</span>
-        </div>
+          <div class="panel-cap">Всего</div>
+          <div class="panel-sum u-money" id="flow-sum">742,10&nbsp;₽</div>
+          <div class="panel-sub"><span id="flow-calls">1 284</span> вызова · в среднем <span id="flow-avg">0,5780</span> ₽ за вызов</div>
 
-        <svg class="panel-chart" viewBox="0 0 320 84" role="img"
-             aria-label="Расход по дням: от 18 ₽ в первый день до 96 ₽ в последний">
-          <defs>
-            <linearGradient id="spend-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stop-color="var(--accent-2)" stop-opacity="0.34"/>
-              <stop offset="100%" stop-color="var(--accent-2)" stop-opacity="0"/>
-            </linearGradient>
-          </defs>
-          <path d="M 6.0 58.8 C 17.9 58.8 17.9 55.0 29.7 55.0 C 41.5 55.0 41.5 50.6 53.4 50.6 C 65.2 50.6 65.2 56.2 77.1 56.2 C 88.9 56.2 88.9 45.0 100.8 45.0 C 112.7 45.0 112.7 35.6 124.5 35.6 C 136.3 35.6 136.3 40.6 148.2 40.6 C 160.0 40.6 160.0 31.2 171.8 31.2 C 183.7 31.2 183.7 38.1 195.5 38.1 C 207.3 38.1 207.3 24.4 219.2 24.4 C 231.1 24.4 231.1 28.8 242.9 28.8 C 254.8 28.8 254.8 15.0 266.6 15.0 C 278.5 15.0 278.5 20.6 290.3 20.6 C 302.1 20.6 302.1 10.0 314.0 10.0 L 314 84 L 6 84 Z" fill="url(#spend-fill)"/>
-          <path d="M 6.0 58.8 C 17.9 58.8 17.9 55.0 29.7 55.0 C 41.5 55.0 41.5 50.6 53.4 50.6 C 65.2 50.6 65.2 56.2 77.1 56.2 C 88.9 56.2 88.9 45.0 100.8 45.0 C 112.7 45.0 112.7 35.6 124.5 35.6 C 136.3 35.6 136.3 40.6 148.2 40.6 C 160.0 40.6 160.0 31.2 171.8 31.2 C 183.7 31.2 183.7 38.1 195.5 38.1 C 207.3 38.1 207.3 24.4 219.2 24.4 C 231.1 24.4 231.1 28.8 242.9 28.8 C 254.8 28.8 254.8 15.0 266.6 15.0 C 278.5 15.0 278.5 20.6 290.3 20.6 C 302.1 20.6 302.1 10.0 314.0 10.0" fill="none" stroke="var(--accent-2)" stroke-width="2"
-                stroke-linecap="round" stroke-linejoin="round"/>
-          <circle cx="314" cy="10" r="3.6" fill="var(--accent-2)"/>
-        </svg>
-        <div class="panel-axis"><span>14 дней назад · 18 ₽</span><span>сегодня · 96 ₽</span></div>
+          <svg class="panel-spark" viewBox="0 0 520 60" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="hero-spark" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="var(--gold)" stop-opacity="0.34"/>
+                <stop offset="100%" stop-color="var(--gold)" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path id="flow-area" fill="url(#hero-spark)"/>
+            <path id="flow-line" fill="none" stroke="var(--gold)" stroke-width="1.8"
+                  stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+          </svg>
 
-        <div class="panel-rows">
-          <div class="panel-row"><span class="m">gpt-5-mini · 2 460 токенов</span><span class="v">0,21 ₽</span></div>
-          <div class="panel-row"><span class="m">claude-sonnet · 6 690 токенов</span><span class="v">1,11 ₽</span></div>
-          <div class="panel-row"><span class="m">gemini-flash · 1 270 токенов</span><span class="v">0,52 ₽</span></div>
+          <div class="streams" id="flow-streams">
+            <div class="stream" data-i="0">
+              <span class="dot" style="background:var(--accent);"></span>
+              <span class="who">OpenAI<small>gpt-5-mini</small></span>
+              <span class="amt u-money">318,40&nbsp;₽</span>
+            </div>
+            <div class="stream" data-i="1">
+              <span class="dot" style="background:var(--gold);"></span>
+              <span class="who">Anthropic<small>claude-sonnet</small></span>
+              <span class="amt u-money">264,90&nbsp;₽</span>
+            </div>
+            <div class="stream" data-i="2">
+              <span class="dot" style="background:var(--accent-2);"></span>
+              <span class="who">Google<small>gemini-flash</small></span>
+              <span class="amt u-money">158,80&nbsp;₽</span>
+            </div>
+          </div>
+
+          <p class="panel-note">Так выглядит расход в кабинете. Цифры здесь растут для наглядности.</p>
         </div>
       </div>
     </div>
@@ -467,7 +486,7 @@ const completion = await client.chat.completions.create({
         {% for row in sample_ledger %}
         <div class="ledger-r">
           <span class="m">{{ row.model }} · {{ row.tokens }}</span>
-          <span class="v">{{ row.rub }}&nbsp;₽</span>
+          <span class="v u-money">{{ row.rub }}&nbsp;₽</span>
         </div>
         {% endfor %}
       </div>
@@ -493,6 +512,165 @@ const completion = await client.chat.completions.create({
 </section>
 
 {% include "_public_footer.html" %}
+
+<script>
+/* ─── Поток вызовов в шапке ───
+   Тезис сервиса, показанный буквально: запросы уходят трём поставщикам, а
+   деньги стекаются в один кошелёк. Каждая частица долетает до панели и
+   увеличивает сумму в ней — это не абстрактный градиент.
+   Всё на canvas: состояния здесь нет, только анимация, фреймворк не нужен. */
+(function () {
+  var canvas = document.getElementById('flow');
+  var sumEl = document.getElementById('flow-sum');
+  if (!canvas || !sumEl) return;
+
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var ctx = canvas.getContext('2d');
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = 0, hh = 0, raf = 0, tick = 0, active = -1;
+  var parts = [];
+
+  var css = getComputedStyle(document.querySelector('.surface-dark') || document.documentElement);
+  var COLORS = [
+    css.getPropertyValue('--accent').trim() || '#5FB3E0',
+    css.getPropertyValue('--gold').trim() || '#F0C878',
+    css.getPropertyValue('--accent-2').trim() || '#67E0CE'
+  ];
+
+  var spent = 742.10, calls = 1284;
+  var byMaker = [318.40, 264.90, 158.80];
+  var series = [18, 24, 31, 22, 40, 55, 47, 62, 51, 73, 66, 88, 79, 96];
+
+  var nf = new Intl.NumberFormat('ru-RU');
+  function money(v, d) {
+    return new Intl.NumberFormat('ru-RU', {
+      minimumFractionDigits: d == null ? 2 : d, maximumFractionDigits: d == null ? 2 : d
+    }).format(v);
+  }
+
+  var callsEl = document.getElementById('flow-calls');
+  var avgEl = document.getElementById('flow-avg');
+  var amtEls = [].slice.call(document.querySelectorAll('#flow-streams .amt'));
+  var lineEl = document.getElementById('flow-line');
+  var areaEl = document.getElementById('flow-area');
+
+  function paintNumbers() {
+    sumEl.innerHTML = money(spent) + '&nbsp;₽';
+    if (callsEl) callsEl.textContent = nf.format(calls);
+    if (avgEl) avgEl.textContent = money(spent / calls, 4);
+    amtEls.forEach(function (el, i) { el.innerHTML = money(byMaker[i]) + '&nbsp;₽'; });
+  }
+
+  function paintSpark() {
+    if (!lineEl) return;
+    var W = 520, H = 60, top = 6, bot = H - 4;
+    var peak = Math.max.apply(null, series) || 1;
+    var pts = series.map(function (v, i) {
+      return [(i / (series.length - 1)) * W, bot - (bot - top) * (v / peak)];
+    });
+    var d = 'M ' + pts[0][0] + ' ' + pts[0][1];
+    for (var i = 1; i < pts.length; i++) {
+      var mid = (pts[i - 1][0] + pts[i][0]) / 2;
+      d += ' C ' + mid + ' ' + pts[i - 1][1] + ' ' + mid + ' ' + pts[i][1] + ' ' + pts[i][0] + ' ' + pts[i][1];
+    }
+    lineEl.setAttribute('d', d);
+    areaEl.setAttribute('d', d + ' L ' + W + ' ' + H + ' L 0 ' + H + ' Z');
+  }
+
+  function resize() {
+    var r = canvas.getBoundingClientRect();
+    w = r.width; hh = r.height;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(hh * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function sink() { return { x: w * 0.635, y: hh * 0.44 }; }
+  function source(i) { return { x: -w * 0.02, y: hh * (0.18 + i * 0.27) }; }
+
+  function spawn() {
+    var i = Math.floor(Math.random() * 3);
+    var a = source(i), b = sink();
+    parts.push({
+      i: i, p: 0, sp: 0.0042 + Math.random() * 0.0042,
+      ax: a.x, ay: a.y, bx: b.x, by: b.y,
+      cx: (a.x + b.x) / 2, cy: a.y + (Math.random() - 0.5) * hh * 0.34,
+      r: 1.9 + Math.random() * 2.6,
+      cost: 0.04 + Math.random() * 0.5
+    });
+  }
+
+  function arrive(i, cost) {
+    spent += cost; calls += 1; byMaker[i] += cost;
+    series[series.length - 1] += cost * 0.35;
+    paintNumbers(); paintSpark();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, hh);
+    var s = sink();
+
+    for (var i = 0; i < 3; i++) {
+      var a = source(i);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo((a.x + s.x) / 2, a.y, s.x, s.y);
+      ctx.strokeStyle = COLORS[i];
+      ctx.globalAlpha = (active >= 0 && active !== i) ? 0.05 : 0.30;
+      ctx.lineWidth = 1.3;
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    var glow = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 170);
+    glow.addColorStop(0, 'rgba(240,200,120,0.22)');
+    glow.addColorStop(1, 'rgba(240,200,120,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 170, 0, Math.PI * 2); ctx.fill();
+
+    for (var k = parts.length - 1; k >= 0; k--) {
+      var q = parts[k];
+      q.p += q.sp;
+      if (q.p >= 1) { parts.splice(k, 1); arrive(q.i, q.cost); continue; }
+      var tt = q.p, u = 1 - tt;
+      var x = u * u * q.ax + 2 * u * tt * q.cx + tt * tt * q.bx;
+      var y = u * u * q.ay + 2 * u * tt * q.cy + tt * tt * q.by;
+      var faded = active >= 0 && active !== q.i;
+      ctx.beginPath();
+      ctx.arc(x, y, q.r * (0.6 + tt * 0.7), 0, Math.PI * 2);
+      ctx.fillStyle = COLORS[q.i];
+      ctx.shadowBlur = faded ? 0 : 12;
+      ctx.shadowColor = COLORS[q.i];
+      ctx.globalAlpha = (faded ? 0.14 : 1) * Math.min(1, (1 - tt) * 4 + 0.35);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+
+    tick++;
+    if (tick % 4 === 0 && parts.length < 150) spawn();
+    raf = requestAnimationFrame(draw);
+  }
+
+  [].forEach.call(document.querySelectorAll('#flow-streams .stream'), function (el) {
+    el.addEventListener('pointerenter', function () { active = +el.dataset.i; });
+    el.addEventListener('pointerleave', function () { active = -1; });
+  });
+
+  resize();
+  paintNumbers();
+  paintSpark();
+  new ResizeObserver(resize).observe(canvas);
+
+  if (reduce) {
+    // Без движения — один статичный кадр: провода и ореол остаются.
+    for (var n = 0; n < 40; n++) { spawn(); parts[parts.length - 1].p = Math.random(); }
+    draw();
+    cancelAnimationFrame(raf);
+  } else {
+    raf = requestAnimationFrame(draw);
+  }
+})();
+</script>
 
 <script>
 (function(){
@@ -571,4 +749,5 @@ const completion = await client.chat.completions.create({
   run();
 })();
 </script>
+</div>
 {% endblock %}
