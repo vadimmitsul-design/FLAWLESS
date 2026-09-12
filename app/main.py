@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import time
@@ -15,6 +16,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import litellm
+import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
@@ -26,7 +28,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import billing, dlp, llm, pricing, ratelimit, reaper, telegram_bot
 from app.csrf import CSRFOriginMiddleware
 from app.config import session_secret_is_weak, settings
-from app.db import get_session
+from app.db import SessionLocal, get_session
 from app.models import (
     ApiKey,
     Customer,
@@ -144,6 +146,7 @@ async def lifespan(app: FastAPI):
     if settings.signup_mode not in _SIGNUP_MODES:
         raise RuntimeError(f"SIGNUP_MODE must be one of {sorted(_SIGNUP_MODES)}, got '{settings.signup_mode}'")
     llm.init_router()
+    await _report_model_readiness()
     telegram_task = None
     if settings.telegram_bot_token:
         telegram_task = asyncio.create_task(telegram_bot.poll_loop())
@@ -478,6 +481,60 @@ DOCS_SEARCH_INDEX = _build_docs_search_index()
 def _fmt_rub(value: Decimal) -> str:
     """Разряды — неразрывным пробелом, чтобы цена не переносилась по строкам."""
     return f"{value:,.0f}".replace(",", "\u00a0")
+
+
+async def _report_model_readiness() -> None:
+    """Сказать при старте, какие модели реально можно вызвать.
+
+    Зачем. Сервис узнаёт о непригодной модели только в момент платного
+    вызова: нет цены — 503, нет ключа провайдера — ошибка авторизации.
+    Так уже случилось на практике: при переезде закупки на OpenRouter в базе
+    остались строки прайса под старые пары (openai/gpt-5-mini), новые пары
+    (openrouter + openai/gpt-5-mini) цены не нашли, и список моделей стал
+    пустым — в чате открывался пустой выпадающий список. Молчать про это
+    до первого вызова нельзя.
+    """
+    missing_keys: set[str] = set()
+    try:
+        cfg = yaml.safe_load(Path(settings.models_config_path).read_text(encoding="utf-8"))
+        for entry in cfg.get("model_list", []):
+            raw = entry.get("litellm_params", {}).get("api_key", "")
+            if isinstance(raw, str) and raw.startswith("os.environ/"):
+                name = raw.split("/", 1)[1]
+                if not os.environ.get(name):
+                    missing_keys.add(name)
+    except Exception:  # конфиг уже прочитан init_router — здесь только диагностика
+        logger.warning("не удалось разобрать %s для проверки ключей", settings.models_config_path)
+
+    if missing_keys:
+        logger.error(
+            "нет переменных окружения с ключами: %s — вызовы этих моделей упадут на авторизации",
+            ", ".join(sorted(missing_keys)),
+        )
+
+    try:
+        async with SessionLocal() as session:
+            rows = await _model_rows(session)
+    except Exception as exc:
+        logger.warning("проверка прайса при старте не выполнена: %s", exc)
+        return
+
+    unpriced = [alias for alias, _p, _m, price in rows
+                if price is None or price.price_per_1m_input_tokens is None]
+    usable = len(rows) - len(unpriced)
+    if unpriced:
+        logger.error(
+            "без действующей цены и потому недоступны: %s — заведите прайс "
+            "(scripts/seed_prices.py) или уберите модель из %s",
+            ", ".join(unpriced), settings.models_config_path,
+        )
+    if usable == 0 and rows:
+        logger.error(
+            "НИ ОДНА модель не доступна для вызова: список моделей пуст во всём "
+            "интерфейсе, а любой вызов вернёт 503"
+        )
+    else:
+        logger.info("моделей готово к вызову: %d из %d", usable, len(rows))
 
 
 async def _model_rows(session: AsyncSession) -> list[tuple[str, str, str, ModelPrice | None]]:

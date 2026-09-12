@@ -258,3 +258,45 @@ def test_theme_toggle_sits_inside_the_bar(client):
     """Плавающая кнопка темы висела поверх правого края и наезжала на
     «Выйти». В шапке она должна стоять в потоке."""
     assert 'class="theme-toggle in-bar"' in _admin_client().get("/").text
+
+
+# ---------- диагностика при старте ----------
+
+
+def test_startup_reports_models_without_a_price(client, caplog):
+    """Сервис обязан сказать про непригодную модель при старте, а не молчать
+    до первого платного вызова.
+
+    Ровно это и случилось на практике: при переезде закупки на OpenRouter в
+    боевой базе остались строки прайса под старые пары, новые цены не нашли,
+    список моделей опустел — и в чате открывался пустой выпадающий список.
+    """
+    import asyncio
+    import logging
+
+    from app.main import _report_model_readiness
+
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        asyncio.run(_report_model_readiness())
+
+    text = caplog.text
+    # В conftest заведена цена только для gpt-5-mini — остальные обязаны
+    # попасть в список недоступных.
+    assert "без действующей цены" in text
+    assert "claude-sonnet" in text
+    assert "моделей готово к вызову: 1 из 4" in text
+
+
+def test_startup_reports_missing_provider_key(client, caplog, monkeypatch):
+    """Ключа провайдера нет — значит вызовы упадут на авторизации.
+    Об этом тоже надо предупреждать на старте."""
+    import asyncio
+    import logging
+
+    from app.main import _report_model_readiness
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with caplog.at_level(logging.INFO, logger="app.main"):
+        asyncio.run(_report_model_readiness())
+
+    assert "OPENROUTER_API_KEY" in caplog.text
