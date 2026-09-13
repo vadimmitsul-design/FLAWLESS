@@ -131,13 +131,26 @@ def _rewrite_links(html: str, known: set[str], app_url: str, moved: dict[str, in
     return _LINK_RE.sub(sub, html)
 
 
+_CABINET_RE = re.compile(r'<a\s+href="/"((?:(?!</a>).)*?\bdata-cabinet\b)', re.S)
+
+
 def _fix_cabinet_link(html: str, app_url: str) -> str:
-    """В шапке документации «В кабинет» ведёт на «/» — на сервере это кабинет
-    для вошедшего и лендинг для гостя. В статике «/» всегда лендинг, поэтому
-    кнопку нужно увести в приложение явно."""
-    return html.replace(
-        '<a href="/" class="dx-cabinet">', f'<a href="{app_url}/" class="dx-cabinet">'
-    )
+    """Ссылка «В кабинет» ведёт на «/» — на сервере это кабинет для вошедшего
+    и лендинг для гостя. В статике «/» всегда лендинг, поэтому её надо увести
+    на домен приложения.
+
+    Опознаётся по атрибуту data-cabinet в самой разметке, а не по классу
+    оформления: прошлая версия искала класс dx-cabinet, который исчез вместе
+    со старой шапкой документации, и страховка молча перестала работать —
+    при этом её тест продолжал зеленеть, потому что проверял функцию на
+    строке, придуманной под функцию.
+    """
+    return _CABINET_RE.sub(lambda m: f'<a href="{app_url}/"{m.group(1)}', html)
+
+
+def _cabinet_link_is_local(html: str) -> bool:
+    """Осталась ли на странице ссылка «в кабинет», ведущая на саму витрину."""
+    return bool(_CABINET_RE.search(html))
 
 
 def _inject_meta(html: str, canonical: str | None, description: str) -> str:
@@ -250,6 +263,45 @@ def _write_netlify_files(out_dir: Path, app_url: str, site_url: str, paths: list
 
 # ---------- сборка ----------
 
+
+_BUILD_MARKER = "# Сгенерировано scripts/build_static_site.py"
+
+
+def _prepare_out_dir(out_dir: Path) -> bool:
+    """Очистить каталог сборки — и ни в коем случае не что-нибудь другое.
+
+    Относительный --out резолвится от корня проекта, поэтому «--out .»
+    означал бы rmtree(корень проекта): исходники, .env с боевыми ключами и
+    backups/ не в git, восстанавливать нечем. Удаляем СОДЕРЖИМОЕ, а не сам
+    каталог, и только если он пуст или несёт след прошлой нашей сборки.
+    """
+    resolved = out_dir.resolve()
+    if resolved == ROOT or resolved in ROOT.parents:
+        print(f"ОШИБКА: --out указывает на {resolved} — это корень проекта или выше.")
+        return False
+
+    if not resolved.exists():
+        resolved.mkdir(parents=True)
+        return True
+
+    entries = list(resolved.iterdir())
+    if entries:
+        marker = resolved / "_redirects"
+        if not (marker.is_file() and marker.read_text(encoding="utf-8").startswith(_BUILD_MARKER)):
+            print(
+                f"ОШИБКА: {resolved} не пуст и не похож на результат прошлой сборки.\n"
+                "        Удалите каталог сами или укажите другой --out."
+            )
+            return False
+    for entry in entries:
+        if entry.is_dir():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+    return True
+
+
+
 async def _page_404_context(app_main) -> dict:
     from app.db import SessionLocal
 
@@ -310,9 +362,8 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
     pages = _page_list(app_main)
     known = {p.rstrip("/") or "/" for p, _ in pages}
 
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+    if not _prepare_out_dir(out_dir):
+        return 1
 
     moved: dict[str, int] = {}
     transport = httpx.ASGITransport(app=app_main.app)
@@ -323,10 +374,9 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
                 print(f"ОШИБКА: {path} отдал {response.status_code}")
                 return 1
             html = response.text
-            had_cabinet = "dx-cabinet" in html
             html = _fix_cabinet_link(html, app_url)
-            if had_cabinet and f'{app_url}/" class="dx-cabinet"' not in html:
-                print(f"ОШИБКА: {path} — кнопка «В кабинет» изменилась, ссылка осталась бы на витрине")
+            if _cabinet_link_is_local(html):
+                print(f"ОШИБКА: {path} — ссылка «В кабинет» осталась бы на самой витрине")
                 return 1
             html = _rewrite_links(html, known, app_url, moved)
             html = _inject_meta(html, site_url + path, description)
@@ -345,6 +395,9 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
         html = _fix_cabinet_link(html, app_url)
         html = _rewrite_links(html, known, app_url, moved)
         html = _inject_meta(html, None, "Страница не найдена.")
+        if _cabinet_link_is_local(html):
+            print("ОШИБКА: 404 — ссылка «В кабинет» осталась бы на самой витрине")
+            return 1
         (out_dir / "404.html").write_text(html, encoding="utf-8")
         print(f"  {'404':<34} -> 404.html")
 

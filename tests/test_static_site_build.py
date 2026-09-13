@@ -65,11 +65,56 @@ def test_повторы_считаются_для_отчёта_сборки():
     assert moved == {"/login": 2}
 
 
-def test_кнопка_в_кабинет_уходит_в_приложение():
-    """«/» в шапке документации — это кабинет для вошедшего; на статике «/»
-    всегда лендинг, поэтому кнопку нужно увести явно."""
-    out = bss._fix_cabinet_link('<a href="/" class="dx-cabinet">В кабинет</a>', APP)
-    assert f'<a href="{APP}/" class="dx-cabinet">' in out
+def test_кнопка_в_кабинет_опознаётся_в_настоящей_разметке():
+    """Тест берёт фрагмент ИЗ ШАБЛОНА, а не строку, придуманную под функцию.
+
+    Прошлая версия страховки искала класс dx-cabinet, который исчез вместе со
+    старой шапкой документации. Функция перестала срабатывать, а её тест
+    продолжал зеленеть — он проверял функцию на синтетической строке. Зелёный
+    тест, который ничего не проверяет, хуже красного.
+    """
+    nav = (PROJECT_ROOT / "app" / "templates" / "_public_nav.html").read_text(encoding="utf-8")
+    assert "data-cabinet" in nav, "в разметке пропал признак ссылки «в кабинет»"
+
+    line = next(line for line in nav.splitlines() if "data-cabinet" in line and "<a " in line)
+    out = bss._fix_cabinet_link(line, APP)
+    assert f'href="{APP}/"' in out, "ссылка осталась на витрине"
+    assert not bss._cabinet_link_is_local(out)
+
+
+def test_локальная_ссылка_в_кабинет_ловится():
+    """Сборка обязана падать, а не молча публиковать кнопку, ведущую на саму
+    витрину."""
+    assert bss._cabinet_link_is_local('<a href="/" data-cabinet class="x">В кабинет</a>')
+    assert not bss._cabinet_link_is_local('<a href="/" class="logo">Flawless</a>')
+
+
+def test_сборка_не_сносит_корень_проекта(tmp_path):
+    """Относительный --out резолвится от корня проекта, поэтому «--out .»
+    означал бы удаление исходников, .env с боевыми ключами и backups/ —
+    ни того, ни другого нет в git."""
+    assert bss._prepare_out_dir(PROJECT_ROOT) is False
+    assert bss._prepare_out_dir(PROJECT_ROOT.parent) is False
+
+
+def test_сборка_не_трогает_чужой_непустой_каталог(tmp_path):
+    foreign = tmp_path / "чужое"
+    foreign.mkdir()
+    (foreign / "важное.txt").write_text("не удалять", encoding="utf-8")
+    assert bss._prepare_out_dir(foreign) is False
+    assert (foreign / "важное.txt").exists()
+
+
+def test_сборка_чистит_свой_прошлый_результат(tmp_path):
+    out = tmp_path / "dist"
+    out.mkdir()
+    (out / "_redirects").write_text(
+        "# Сгенерировано scripts/build_static_site.py — не править руками.\n", encoding="utf-8"
+    )
+    (out / "старая").mkdir()
+    (out / "старая" / "index.html").write_text("old", encoding="utf-8")
+    assert bss._prepare_out_dir(out) is True
+    assert list(out.iterdir()) == []
 
 
 def test_логотип_в_шапке_остаётся_на_витрине():

@@ -279,7 +279,12 @@
 
   .u-grid{display:grid;gap:20px;}
   .u-grid-3{grid-template-columns:repeat(auto-fit,minmax(272px,1fr));}
-  .u-grid-2{grid-template-columns:repeat(auto-fit,minmax(404px,1fr));}
+    /* min(404px,100%) вместо голых 404px: жёсткий минимум в minmax() —
+     это пол, ниже которого колонка не сжимается, и auto-fit её не
+     спасает. На экране уже 436px страница становилась шире вьюпорта,
+     и вся витрина уезжала вбок — на том самом мобильном трафике,
+     ради которого она и делалась. Класс используется в 11 местах. */
+  .u-grid-2{grid-template-columns:repeat(auto-fit,minmax(min(404px,100%),1fr));}
   /* Каталог моделей: карточки узкие, чтобы четыре помещались в ряд и
      последняя не оставалась сиротой во второй строке. */
   .u-grid-models{grid-template-columns:repeat(auto-fit,minmax(236px,1fr));}
