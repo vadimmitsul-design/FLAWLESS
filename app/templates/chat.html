@@ -107,6 +107,12 @@
 
   form.addEventListener('submit', function(e){
     e.preventDefault();
+    // Enter при уже идущем запросе. form.requestSubmit() (обработчик keydown
+    // ниже) не смотрит на disabled у кнопки, поэтому набранное во время
+    // ожидания уходило вторым параллельным ПЛАТНЫМ вызовом в тот же диалог:
+    // оба списывались, второй отвечал без контекста первого, а порядок
+    // реплик в истории перемешивался.
+    if (sendBtn.disabled) return;
     var text = input.value.trim();
     var file = fileInput.files[0] || null;
     if (!text && !file) return;

@@ -303,14 +303,31 @@ def test_alerts_fire_on_calls_without_cost(client):
     assert any(key == "uncosted" for key, _ in problems)
 
 
-def test_alerts_stay_quiet_when_nothing_is_wrong():
+def test_alerts_stay_quiet_when_nothing_is_wrong(monkeypatch):
+    """Раньше здесь не было ни одного assert — тест вызывал функцию и не
+    смотрел результат.
+
+    И посылка «старые события других тестов в часовое окно не попадают» была
+    ЛОЖНОЙ: база одна на весь прогон, соседние тесты успевают наделать и
+    вызовов без себестоимости, и ошибок — в окно они попадают все. Поэтому
+    окно уводится в заведомо пустое время: смотрим на час, в котором ничего
+    не происходило, и требуем полной тишины."""
+    from datetime import datetime, timezone
+
+    quiet_hour = datetime(2031, 1, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(alerts, "utcnow", lambda: quiet_hour)
+    # Раздел ресурсов выключаем отдельно: у него окно смотрит НАЗАД без
+    # нижней границы (expires_at <= now+7дн), поэтому в будущем часе в него
+    # попадают все ресурсы, заведённые другими тестами. Тишину по ресурсам
+    # проверяет tests/test_resources.py на своих данных.
+    monkeypatch.setattr(alerts.settings, "enable_resources", False)
+
     async def _collect():
         async with SessionLocal() as session:
-            # Смотрим только на окно в час: старые события из других тестов
-            # в него не попадают, поэтому список должен быть пустым.
             return await alerts._collect_problems(session)
 
-    asyncio.run(_collect())  # не падает и не шлёт ничего лишнего
+    problems = asyncio.run(_collect())
+    assert problems == [], f"тревога на час, в котором ничего не было: {problems}"
 
 
 def test_alert_cooldown_prevents_repeat_spam():

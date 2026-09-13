@@ -48,8 +48,8 @@ ROOT = Path(__file__).resolve().parent.parent
 # редирект POST-запроса — источник трудноуловимых ошибок у клиентов.
 APP_ROUTES = [
     "/login", "/logout", "/signup", "/forgot-password", "/verify",
-    "/chat", "/keys", "/topup", "/resources", "/shop", "/prompts",
-    "/archive", "/children", "/admin", "/telegram",
+    "/chat", "/api-key", "/api-keys", "/topups", "/usage", "/resources",
+    "/shop", "/prompts", "/archive", "/children", "/admin", "/telegram",
 ]
 
 SITE_DESCRIPTION = (
@@ -110,6 +110,14 @@ def _out_file(out_dir: Path, path: str) -> Path:
 # ---------- ссылки и метатеги ----------
 
 _LINK_RE = re.compile(r'(href|action)="(/[^"]*)"')
+
+
+def _has_scheme(url: str) -> bool:
+    """Адрес без схемы браузер считает ОТНОСИТЕЛЬНЫМ путём: --app-url
+    app.flawless.ru давал href="app.flawless.ru/login", то есть кнопка
+    «Войти» вела на flawless.ru/app.flawless.ru/login. То же и с --site-url:
+    он уходит в canonical и в sitemap."""
+    return url.startswith("http://") or url.startswith("https://")
 
 
 def _rewrite_links(html: str, known: set[str], app_url: str, moved: dict[str, int]) -> str:
@@ -181,6 +189,27 @@ def _inject_meta(html: str, canonical: str | None, description: str) -> str:
 
 
 # ---------- файлы Netlify ----------
+
+def _check_app_routes(app_main) -> list[str]:
+    """Адреса из APP_ROUTES, которых в приложении нет.
+
+    Список писался руками, и часть адресов в приложении не существует:
+    редирект уводил человека с витрины в 404 приложения вместо честной 404
+    витрины — то есть страховка работала хуже, чем её отсутствие.
+    """
+    known = set()
+    for route in app_main.app.routes:
+        path = getattr(route, "path", None)
+        if not path:
+            continue
+        known.add(path)
+        # /admin/customers -> /admin: префикс считаем существующим, если под
+        # ним есть хоть один маршрут.
+        parts = path.strip("/").split("/")
+        if parts:
+            known.add("/" + parts[0])
+    return [route for route in APP_ROUTES if route not in known]
+
 
 def _redirect_rules(app_url: str) -> list[tuple[str, str, int]]:
     rules: list[tuple[str, str, int]] = []
@@ -359,6 +388,15 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
         return 1
     print(f"В каталоге моделей с ценой: {len(catalog['calc_rows'])}\n")
 
+    missing = _check_app_routes(app_main)
+    if missing:
+        print(
+            "ОШИБКА: в APP_ROUTES есть адреса, которых нет в приложении: "
+            + ", ".join(missing)
+            + "\n        Редирект увёл бы человека с витрины в 404 приложения."
+        )
+        return 1
+
     pages = _page_list(app_main)
     known = {p.rstrip("/") or "/" for p, _ in pages}
 
@@ -426,6 +464,10 @@ def main() -> int:
 
     app_url = args.app_url.rstrip("/")
     site_url = args.site_url.rstrip("/")
+    for name, value in (("--app-url", app_url), ("--site-url", site_url)):
+        if not _has_scheme(value):
+            print(f"ОШИБКА: {name}={value} — адрес должен начинаться с http:// или https://")
+            return 1
     out_dir = Path(args.out)
     if not out_dir.is_absolute():
         out_dir = ROOT / out_dir

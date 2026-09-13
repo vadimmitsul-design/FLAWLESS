@@ -98,7 +98,12 @@ class Settings(BaseSettings):
     # целиком между start_call и finalize_*, ни except, ни finally не
     # выполнятся вообще, резерв виснет навсегда без внешней подметки.
     # С запасом над llm_num_retries * llm_timeout_seconds (сейчас 2*120=240с).
-    stale_pending_reap_after_seconds: int = 600
+    # 0 — считать автоматически из потолка одного вызова, см.
+    # Settings.stale_pending_window(). Фиксированные 600 с были МЕНЬШЕ
+    # реального потолка (2 повтора × 120 с + сам вызов = до 720 с): уборщик
+    # закрывал событие ещё выполняющегося вызова как failed и снимал резерв,
+    # а вызов потом финализировался поверх закрытого события.
+    stale_pending_reap_after_seconds: int = 0
     reaper_interval_seconds: int = 120
     # Контроль маржи по моделям (1.6 доработок) — ниже этого % (или отрицательная)
     # маржа подсвечивается в /admin/overview и /admin/reconciliation как сигнал,
@@ -107,6 +112,19 @@ class Settings(BaseSettings):
     # Сверка с поставщиком (1.5 доработок) — расхождение между нашей себестоимостью
     # (model_prices) и контрольным litellm_cost выше этого % подсвечивается за день.
     cost_discrepancy_alert_threshold_pct: float = 10.0
+
+
+    def stale_pending_window(self) -> int:
+        """Через сколько секунд считать pending-событие зависшим.
+
+        Явное значение уважается; ноль означает «посчитай сам»: столько,
+        сколько максимум может длиться один вызов со всеми повторами, плюс
+        двойной запас. Держать это число руками синхронным с таймаутами
+        никто не будет — они уже разъехались один раз.
+        """
+        if self.stale_pending_reap_after_seconds > 0:
+            return self.stale_pending_reap_after_seconds
+        return (self.llm_num_retries + 1) * self.llm_timeout_seconds * 2
 
 
 settings = Settings()

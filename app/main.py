@@ -715,7 +715,14 @@ async def _public_page_context(session: AsyncSession) -> dict:
         # свалиться в экспоненту: Decimal("30.00").normalize() это 3E+1.
         "markup_percent": f"{cfg.markup_percent.normalize():f}",
         "usd_rub_rate": f"{cfg.usd_rub_rate.normalize():f}",
-        "default_model": models[0]["alias"] if models else "gpt-5-mini",
+        # Первая ПРОЦЕНЁННАЯ, а не просто первая: примеры curl и Python на
+        # лендинге и во всей документации подставляют этот алиас, а вызов
+        # модели без действующей цены отклоняется с 503. Документация звала
+        # бы читателя на заведомо ломающийся запрос.
+        "default_model": next(
+            (m["alias"] for m in models if m["priced"]),
+            models[0]["alias"] if models else "gpt-5-mini",
+        ),
         "max_output_tokens_cap": settings.max_output_tokens_cap,
         "rate_limit_per_window": settings.rate_limit_per_window,
         "rate_limit_window_seconds": settings.rate_limit_window_seconds,
@@ -1314,6 +1321,18 @@ async def admin_request_reject(
         raise HTTPException(status_code=404)
     if req.status != "requested":
         raise HTTPException(status_code=409, detail="по заявке уже принято решение")
+    if not decision_note.strip():
+        # Отказ без объяснения заставляет подавать то же самое снова — это и
+        # обещано сотруднику на его странице.
+        raise HTTPException(status_code=400, detail="укажите причину отказа")
+    claimed = await session.execute(
+        update(ResourceRequest)
+        .where(ResourceRequest.id == req.id, ResourceRequest.status == "requested")
+        .values(status="rejected")
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
     req.status = "rejected"
     req.decision_note = decision_note.strip() or None
     req.decided_by_admin_id = customer.id
@@ -1356,6 +1375,19 @@ async def admin_request_fulfil(
     end = _parse_date(period_end)
     if end is None:
         raise HTTPException(status_code=400, detail="укажите, до какого числа оплачено")
+
+    # Захват заявки атомарным UPDATE, а не присваиванием после проверки:
+    # проверка статуса выше и запись — разные моменты, между ними помещается
+    # второй такой же запрос (двойной клик, две вкладки), и каждый завёл бы
+    # свой ресурс и свой платёж. Тот же приём, что у подтверждения пополнения.
+    claimed = await session.execute(
+        update(ResourceRequest)
+        .where(ResourceRequest.id == req.id, ResourceRequest.status == "requested")
+        .values(status="fulfilled")
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
 
     resource = Resource(
         kind=req.kind,
@@ -3618,26 +3650,42 @@ _CHAT_MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # с запасом под фото; �
 # текст. См. CLAUDE.md.
 
 
-def _chat_message_display_text(content: str) -> str:
-    """content может быть JSON-списком частей (текст+картинка, OpenAI-формат) —
-    для истории в интерфейсе достаточно текстовой части."""
+def _chat_message_parts_or_none(content: str):
+    """Список частей OpenAI-формата (текст + картинка) — или None, если это
+    обычный текст.
+
+    Одного «[» в начале мало: «[1, 2, 3]» от пользователя — тоже валидный
+    JSON-массив. Его разбирало как части, и в истории вместо текста
+    показывалось «[вложение]», а провайдеру при КАЖДОМ следующем сообщении
+    уходил список чисел вместо строки — вызов падал 502, и диалог ломался
+    навсегда: удалить сообщение в интерфейсе нечем. Свой формат узнаём по
+    ФОРМЕ: непустой список словарей, у каждого строковый type.
+    """
     if not content.startswith("["):
-        return content
+        return None
     try:
         parts = json.loads(content)
     except (ValueError, TypeError):
+        return None
+    if not isinstance(parts, list) or not parts:
+        return None
+    if not all(isinstance(part, dict) and isinstance(part.get("type"), str) for part in parts):
+        return None
+    return parts
+
+
+def _chat_message_display_text(content: str) -> str:
+    """Для истории в интерфейсе достаточно текстовой части."""
+    parts = _chat_message_parts_or_none(content)
+    if parts is None:
         return content
-    texts = [p.get("text", "") for p in parts if isinstance(p, dict) and p.get("type") == "text"]
+    texts = [part.get("text", "") for part in parts if part.get("type") == "text"]
     return "\n".join(t for t in texts if t) or "[вложение]"
 
 
 def _chat_message_provider_content(content: str):
-    if content.startswith("["):
-        try:
-            return json.loads(content)
-        except (ValueError, TypeError):
-            return content
-    return content
+    parts = _chat_message_parts_or_none(content)
+    return content if parts is None else parts
 
 
 @app.get("/chat")

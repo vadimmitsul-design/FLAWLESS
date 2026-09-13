@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 async def reap_stale_pending_events(session) -> int:
-    cutoff = utcnow() - timedelta(seconds=settings.stale_pending_reap_after_seconds)
+    cutoff = utcnow() - timedelta(seconds=settings.stale_pending_window())
     stale = (
         await session.execute(
             select(UsageEvent).where(UsageEvent.status == "pending", UsageEvent.created_at < cutoff)
