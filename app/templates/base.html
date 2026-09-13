@@ -1,17 +1,24 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru"{% if dark_default %} data-theme-default="dark"{% endif %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Flawless{% endblock %}</title>
 <script>
 (function(){
-  try {
-    var stored = localStorage.getItem('theme');
-    if (stored === 'light' || stored === 'dark') {
-      document.documentElement.setAttribute('data-theme', stored);
-    }
-  } catch (e) {}
+  var root = document.documentElement;
+  var stored = null;
+  try { stored = localStorage.getItem('theme'); } catch (e) {}
+  if (stored === 'light' || stored === 'dark') {
+    root.setAttribute('data-theme', stored);
+    return;
+  }
+  // Витрина тёмная всегда, и документация — её часть. Открывать справочник
+  // светлым после тёмного лендинга выглядит как самопроизвольная смена темы.
+  // Умолчание ставится только когда человек НИ РАЗУ не трогал переключатель:
+  // его собственный выбор важнее любого умолчания страницы.
+  var fallback = root.getAttribute('data-theme-default');
+  if (fallback) root.setAttribute('data-theme', fallback);
 })();
 </script>
 <!-- Знак инлайном, а не файлом: статики у приложения нет, а без явного
@@ -330,7 +337,15 @@
   .u-nav a{font-size:15px;font-weight:600;color:var(--text-dim);}
   .u-nav a:hover{color:var(--text);}
   .u-nav a.is-here{color:var(--accent);}
-  @media (max-width:1040px){.u-nav{display:none;}}
+  @media (max-width:1040px){
+    .u-nav{gap:18px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;}
+    .u-nav::-webkit-scrollbar{display:none;}
+    .u-nav a{white-space:nowrap;font-size:14px;}
+  }
+  @media (max-width:640px){
+    .u-head .u-wrap{height:auto;flex-wrap:wrap;padding-top:12px;padding-bottom:12px;}
+    .u-nav{order:3;flex-basis:100%;gap:16px;}
+  }
 
   .u-foot{border-top:1px solid var(--border);background:var(--bg-2);}
   .u-foot-cols{display:grid;grid-template-columns:1.5fr repeat(3,1fr);gap:36px;padding:58px 0 40px;}

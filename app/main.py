@@ -644,6 +644,12 @@ async def _public_page_context(session: AsyncSession) -> dict:
         )
     return {
         "customer": None,
+        # Витрина всегда тёмная (.surface-dark), поэтому и документация,
+        # как её часть, открывается тёмной — иначе переход с лендинга в
+        # справочник читается как самопроизвольная смена темы. Во внутреннем
+        # контуре витрины нет, документация там часть кабинета и слушается
+        # общей темы. Явный выбор пользователя перевешивает это умолчание.
+        "dark_default": settings.enable_public_site,
         "models": models,
         "calc_rows": calc_rows,
         "sample_ledger": sample_ledger,
@@ -658,12 +664,20 @@ async def _public_page_context(session: AsyncSession) -> dict:
     }
 
 
-async def _render_doc(request: Request, path: str, session: AsyncSession):
+async def _render_doc(
+    request: Request, path: str, session: AsyncSession, signed_in: bool = False
+):
     group, _path, title, template, lead = _DOCS_PAGES[_DOCS_INDEX[path]]
     index = _DOCS_INDEX[path]
     ctx = await _public_page_context(session)
     ctx.update(
         {
+            # Шапка одна на всю витрину, поэтому вошедшему она показывает
+            # «В кабинет», а гостю — «Войти». Сам customer в контекст не
+            # кладётся: по нему base.html рисует ШАПКУ КАБИНЕТА, и на
+            # странице оказалось бы две шапки подряд.
+            "signed_in": signed_in,
+            "here": "docs",
             "docs_nav": DOCS_NAV,
             "docs_search": DOCS_SEARCH_INDEX,
             "active_path": path,
@@ -686,17 +700,26 @@ async def _render_doc(request: Request, path: str, session: AsyncSession):
 
 
 @app.get("/docs")
-async def docs_index(request: Request, session: AsyncSession = Depends(get_session)):
-    return await _render_doc(request, "/docs", session)
+async def docs_index(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    return await _render_doc(request, "/docs", session, signed_in=customer is not None)
 
 
 # slug:path, а не slug: адреса интеграций вложенные (/docs/integrations/cursor).
 @app.get("/docs/{slug:path}")
-async def docs_page(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+async def docs_page(
+    slug: str,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
     path = f"/docs/{slug}"
     if path not in _DOCS_INDEX:
         raise HTTPException(status_code=404)
-    return await _render_doc(request, path, session)
+    return await _render_doc(request, path, session, signed_in=customer is not None)
 
 
 # (адрес, шаблон, заголовок, надзаголовок, H1, подзаголовок, пункт меню)
@@ -734,11 +757,14 @@ _MARKETING_PAGES = [
 _MARKETING_INDEX = {page[0]: page for page in _MARKETING_PAGES}
 
 
-async def _render_marketing(request: Request, path: str, session: AsyncSession):
+async def _render_marketing(
+    request: Request, path: str, session: AsyncSession, signed_in: bool = False
+):
     _path, template, title, kicker, h1, lead, here = _MARKETING_INDEX[path]
     ctx = await _public_page_context(session)
     ctx.update(
         {
+            "signed_in": signed_in,
             "page_title": title,
             "page_kicker": kicker,
             "page_h1": h1,
@@ -751,29 +777,47 @@ async def _render_marketing(request: Request, path: str, session: AsyncSession):
 
 
 @app.get("/models", dependencies=[Depends(_feature_public_site)])
-async def page_models(request: Request, session: AsyncSession = Depends(get_session)):
-    return await _render_marketing(request, "/models", session)
+async def page_models(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    return await _render_marketing(request, "/models", session, signed_in=customer is not None)
 
 
 @app.get("/pricing", dependencies=[Depends(_feature_public_site)])
-async def page_pricing(request: Request, session: AsyncSession = Depends(get_session)):
-    return await _render_marketing(request, "/pricing", session)
+async def page_pricing(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    return await _render_marketing(request, "/pricing", session, signed_in=customer is not None)
 
 
 @app.get("/product/{slug}", dependencies=[Depends(_feature_public_site)])
-async def page_product(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+async def page_product(
+    slug: str,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
     path = f"/product/{slug}"
     if path not in _MARKETING_INDEX:
         raise HTTPException(status_code=404)
-    return await _render_marketing(request, path, session)
+    return await _render_marketing(request, path, session, signed_in=customer is not None)
 
 
 @app.get("/solutions/{slug}", dependencies=[Depends(_feature_public_site)])
-async def page_solutions(slug: str, request: Request, session: AsyncSession = Depends(get_session)):
+async def page_solutions(
+    slug: str,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
     path = f"/solutions/{slug}"
     if path not in _MARKETING_INDEX:
         raise HTTPException(status_code=404)
-    return await _render_marketing(request, path, session)
+    return await _render_marketing(request, path, session, signed_in=customer is not None)
 
 
 # ---------- ресурсы со сроком (прокси, подписки) ----------

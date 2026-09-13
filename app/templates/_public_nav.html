@@ -3,19 +3,31 @@
     <a href="/" class="logo" style="color:var(--text);">
       <span class="wordmark" style="font-size:23px;">Flawless</span>
     </a>
+    {# Один и тот же ряд ссылок на лендинге, страницах продукта и в
+       документации. Раньше у документации была своя шапка с тремя пунктами
+       из шести — человек заходил в справочник и терял половину сайта. #}
     <nav class="u-nav">
       <a href="/models" class="{% if here == 'models' %}is-here{% endif %}">Модели</a>
       <a href="/pricing" class="{% if here == 'pricing' %}is-here{% endif %}">Цены</a>
       <a href="/product/api" class="{% if here == 'api' %}is-here{% endif %}">API</a>
       <a href="/product/chat" class="{% if here == 'chat' %}is-here{% endif %}">Чат</a>
       <a href="/solutions/developers" class="{% if here == 'solutions' %}is-here{% endif %}">Решения</a>
-      <a href="/docs">Документация</a>
+      <a href="/docs" class="{% if here == 'docs' %}is-here{% endif %}">Документация</a>
     </nav>
     <div class="row">
+      {% if docs_search %}
+      <button type="button" class="dx-search-btn" id="dx-open-search">
+        <span>Поиск по документации</span><kbd>Ctrl K</kbd>
+      </button>
+      {% endif %}
       <button type="button" class="theme-toggle in-bar" onclick="toggleTheme()"
               title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
+      {% if signed_in %}
+      <a href="/" class="u-btn u-btn-primary u-btn-sm">В кабинет</a>
+      {% else %}
       <a href="/login" class="u-btn u-btn-ghost u-btn-sm">Войти</a>
       <a href="/signup" class="u-btn u-btn-primary u-btn-sm">Начать</a>
+      {% endif %}
     </div>
   </div>
 </header>

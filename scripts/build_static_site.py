@@ -268,13 +268,44 @@ async def _page_404_context(app_main) -> dict:
     return ctx
 
 
+async def _init_model_registry() -> None:
+    """Опрос через ASGI НЕ запускает lifespan приложения — а именно там
+    вызывается llm.init_router(), который читает config/models.yaml в реестр
+    алиасов. Без него known_models() пуст, и КАЖДАЯ страница с ценами
+    собирается пустой: прайс-лист лендинга, калькулятор, каталог моделей,
+    таблица цен в документации. Отказ при этом тихий — страницы отдают 200.
+
+    Полный lifespan звать нельзя: он поднимает уборщик, оповещения и
+    телеграм-бота, которым в сборщике делать нечего.
+    """
+    from app import llm
+
+    llm.init_router()
+
+
 async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
     import httpx
 
     if seed:
         await _seed_temporary_db()
 
+    await _init_model_registry()
+
     from app import main as app_main
+
+    from app.db import SessionLocal
+
+    async with SessionLocal() as session:
+        catalog = await app_main._public_page_context(session)
+    if not catalog["calc_rows"]:
+        print(
+            "ОШИБКА: ни одной модели с действующей ценой — витрина собралась бы "
+            "без прайс-листа, без калькулятора и с пустым каталогом.\n"
+            "        Проверьте config/models.yaml и строки в model_prices "
+            "(scripts/seed_prices.py, scripts/sync_openrouter_prices.py)."
+        )
+        return 1
+    print(f"В каталоге моделей с ценой: {len(catalog['calc_rows'])}\n")
 
     pages = _page_list(app_main)
     known = {p.rstrip("/") or "/" for p, _ in pages}
@@ -299,6 +330,9 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
                 return 1
             html = _rewrite_links(html, known, app_url, moved)
             html = _inject_meta(html, site_url + path, description)
+            if '<script id="calc-data" type="application/json">[]' in html:
+                print(f"ОШИБКА: {path} — калькулятор собрался с пустым списком моделей")
+                return 1
             target = _out_file(out_dir, path)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(html, encoding="utf-8")

@@ -3,15 +3,6 @@
 
 {% block head %}
 <style>
-  .dx-top{position:sticky;top:0;z-index:40;background:color-mix(in oklab, var(--bg) 90%, transparent);
-    backdrop-filter:blur(12px);border-bottom:1px solid var(--border);}
-  .dx-top .wrap{height:64px;display:flex;align-items:center;justify-content:space-between;gap:20px;}
-  .dx-top .links{display:flex;align-items:center;gap:26px;}
-  .dx-top .links a{font-size:14.5px;font-weight:600;color:var(--text-dim);}
-  .dx-top .links a:hover{color:var(--text);}
-  .dx-cabinet{height:36px;padding:0 16px;display:inline-flex;align-items:center;border-radius:8px;
-    background:var(--accent);color:var(--btn-on-accent);font-weight:700;font-size:14px;}
-  .dx-cabinet:hover{background:var(--accent-hi);color:var(--btn-on-accent);}
 
   .dx-layout{max-width:1240px;margin:0 auto;padding:0 32px;display:grid;
     grid-template-columns:252px minmax(0,1fr) 196px;gap:48px;align-items:start;}
@@ -19,7 +10,7 @@
   @media (max-width:780px){.dx-layout{grid-template-columns:1fr;gap:24px;}.dx-side{position:static;height:auto;border-right:none;
     border-bottom:1px solid var(--border);padding-bottom:20px;}}
 
-  .dx-side{position:sticky;top:64px;max-height:calc(100vh - 64px);overflow-y:auto;padding:34px 0 60px;}
+  .dx-side{position:sticky;top:74px;max-height:calc(100vh - 74px);overflow-y:auto;padding:34px 0 60px;}
   .dx-group{margin-bottom:26px;}
   .dx-group-title{font-size:11.5px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;
     color:var(--text-faint);margin-bottom:10px;}
@@ -32,8 +23,8 @@
   .dx-crumb{font-size:13px;color:var(--text-faint);margin-bottom:14px;}
   .dx-main h1{font-size:clamp(28px,4vw,40px);letter-spacing:-0.02em;line-height:1.12;}
   .dx-lead{font-size:18px;line-height:1.65;color:var(--text-dim);margin:16px 0 0;max-width:70ch;}
-  .dx-main h2{font-size:24px;letter-spacing:-0.015em;margin:52px 0 0;scroll-margin-top:88px;}
-  .dx-main h3{font-size:17.5px;margin:32px 0 0;scroll-margin-top:88px;}
+  .dx-main h2{font-size:24px;letter-spacing:-0.015em;margin:52px 0 0;scroll-margin-top:98px;}
+  .dx-main h3{font-size:17.5px;margin:32px 0 0;scroll-margin-top:98px;}
   .dx-main p{font-size:16px;line-height:1.7;color:var(--text-dim);margin:14px 0 0;max-width:72ch;}
   .dx-main ul,.dx-main ol{margin:14px 0 0;padding-left:22px;max-width:72ch;}
   .dx-main li{font-size:16px;line-height:1.7;color:var(--text-dim);margin-bottom:9px;}
@@ -62,7 +53,7 @@
   .dx-card span{font-size:14px;color:var(--text-dim);line-height:1.55;}
   .dx-card{text-decoration:none !important;}
 
-  .dx-toc{position:sticky;top:64px;padding:46px 0;}
+  .dx-toc{position:sticky;top:74px;padding:46px 0;}
   .dx-toc-title{font-size:11.5px;font-weight:800;letter-spacing:0.09em;text-transform:uppercase;
     color:var(--text-faint);margin-bottom:12px;}
   .dx-toc a{display:block;font-size:13.5px;line-height:1.5;color:var(--text-faint);padding:5px 0;}
@@ -105,28 +96,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="dx-top">
-  <div class="wrap">
-    <div style="display:flex;align-items:center;gap:34px;">
-      <a href="/" class="logo" style="color:var(--text);">
-        <span class="wordmark" style="font-size:19px;">Flawless</span>
-      </a>
-      <div class="links">
-        <a href="/docs">Документация</a>
-        <a href="/models">Модели</a>
-        <a href="/pricing">Цены</a>
-      </div>
-    </div>
-    <div class="row">
-      <button type="button" class="dx-search-btn" id="dx-open-search">
-        <span>Поиск по документации</span><kbd>Ctrl K</kbd>
-      </button>
-      <button type="button" class="theme-toggle in-bar" onclick="toggleTheme()"
-              title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
-      <a href="/" class="dx-cabinet">В кабинет</a>
-    </div>
-  </div>
-</div>
+{% include "_public_nav.html" %}
 
 <div class="dx-layout">
   <aside class="dx-side">
