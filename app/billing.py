@@ -266,6 +266,48 @@ def estimate_reserve_rub(
     return (base_rub * margin + extra_fixed_rub).quantize(_RUB_QUANT)
 
 
+async def estimate_reserve_for_chain(
+    session: AsyncSession,
+    alias: str,
+    messages: list[dict],
+    extra: dict,
+    pricing_cfg: PricingConfig,
+    now: datetime,
+    extra_fixed_rub: Decimal = Decimal(0),
+) -> Decimal:
+    """Резерв по самой дорогой модели, которая МОЖЕТ ответить.
+
+    Резервировали по цене запрошенной модели, а списывали по цене той, что
+    фактически ответила. Цепочка по умолчанию ведёт gpt-5-mini (0.25/2.00)
+    на gemini-flash (1.50/9.00) — в 4,5 раза дороже по выводу. При массовом
+    rate limit у поставщика на дорогую модель переезжают все клиенты разом,
+    каждый со своим заниженным резервом, и балансы уходят в минус именно
+    тогда, когда это хуже всего.
+
+    Цепочка известна ДО вызова, так что это просто максимум по нескольким
+    строкам прайса.
+    """
+    from app import llm  # локальный импорт: llm импортирует pricing, не billing
+
+    best = None
+    for candidate in llm.fallback_chain(alias):
+        try:
+            provider, model = llm.resolve_alias(candidate)
+        except KeyError:
+            continue
+        price = await pricing_module.find_price(session, provider, model, None, None, now)
+        if price is None or price.price_per_1m_input_tokens is None:
+            continue
+        reserve = estimate_reserve_rub(price, messages, extra, pricing_cfg, extra_fixed_rub)
+        if best is None or reserve > best:
+            best = reserve
+    if best is None:
+        # Ни у одной модели цепочки нет цены. Вызов всё равно будет отклонён
+        # выше (price_for_call), но резерв обязан остаться консервативным.
+        best = estimate_reserve_rub(None, messages, extra, pricing_cfg, extra_fixed_rub)
+    return best
+
+
 async def start_call(
     session: AsyncSession,
     actor_customer_id: int,
@@ -648,6 +690,15 @@ async def charge_prompt_fee(
         )
     )
     payer.balance_rub -= prompt.price_rub
+    # Плата должна попасть и в СУММУ СОБЫТИЯ, а не только в журнал: вся
+    # арифметика «сколько человек потратил» построена на charged_rub —
+    # потолки на кошелёк и на ключ, отчёт для бухгалтерии, карточка человека,
+    # сводка в кабинете клиента. Пока плата шла мимо, бюджетный потолок не
+    # ограничивал расход на промпты вообще, а клиент видел у себя почти
+    # нулевой расход при вычерпанном кошельке.
+    event = await session.get(UsageEvent, usage_event_id)
+    if event is not None:
+        event.charged_rub = (event.charged_rub or Decimal(0)) + prompt.price_rub
 
     if author is not None and payer.balance_rub >= 0:
         royalty = (prompt.price_rub * _ROYALTY_SHARE).quantize(_RUB_QUANT)

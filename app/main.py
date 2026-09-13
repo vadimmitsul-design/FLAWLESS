@@ -3061,11 +3061,15 @@ async def chat_completions(
                 }
             },
         )
-    reserve_rub = billing.estimate_reserve_rub(
-        reserve_price,
+    # По ВСЕЙ цепочке, а не по запрошенной модели: списывается цена того, кто
+    # фактически ответил, а запасная модель бывает в разы дороже.
+    reserve_rub = await billing.estimate_reserve_for_chain(
+        session,
+        body.model,
         messages,
         extra,
         pricing_cfg,
+        utcnow(),
         extra_fixed_rub=prompt.price_rub if prompt is not None else Decimal(0),
     )
 
@@ -3607,8 +3611,8 @@ async def web_chat_send(
             detail=f"Модель «{model}» сейчас недоступна: не настроена цена. Сообщите администратору.",
         )
     call_extra = pricing.clamp_output_tokens({})
-    reserve_rub = billing.estimate_reserve_rub(
-        reserve_price, prepared_messages, call_extra, pricing_cfg
+    reserve_rub = await billing.estimate_reserve_for_chain(
+        session, model, prepared_messages, call_extra, pricing_cfg, utcnow()
     )
 
     try:

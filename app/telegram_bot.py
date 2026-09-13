@@ -25,6 +25,22 @@ _API = f"https://api.telegram.org/bot{settings.telegram_bot_token}"
 _FILE_API = f"https://api.telegram.org/file/bot{settings.telegram_bot_token}"
 
 
+def safe_error(e: BaseException) -> str:
+    """Текст ошибки без токена бота.
+
+    httpx кладёт в сообщение об ошибке полный URL запроса, а в URL Telegram
+    токен стоит прямо в пути (/bot<ТОКЕН>/getUpdates). Любой
+    logger.warning("... %r", e) на неудачном вызове writes боевой токен в
+    лог приложения — оттуда он уезжает в любую систему сбора логов и в
+    вывод `docker logs`.
+    """
+    text = f"{type(e).__name__}: {e}"
+    token = settings.telegram_bot_token
+    if token:
+        text = text.replace(token, "<ТОКЕН-СКРЫТ>")
+    return text
+
+
 async def _api_call(method: str, **params) -> dict:
     async with httpx.AsyncClient(timeout=40) as client:
         r = await client.get(f"{_API}/{method}", params=params)
@@ -35,9 +51,34 @@ async def _api_call(method: str, **params) -> dict:
         return data["result"]
 
 
+_TELEGRAM_MESSAGE_LIMIT = 4000  # у Telegram 4096, оставляем запас под разметку
+
+
 async def send_message(chat_id: int, text: str) -> None:
+    """Длинный ответ уходит НЕСКОЛЬКИМИ сообщениями, а не обрезается.
+
+    Раньше text[:4000] молча отбрасывал хвост: человек платил за полный
+    ответ модели, получал обрубок на полуслове и не знал, что ответ
+    продолжался. Режем по границам строк, чтобы код и списки не рвались
+    посреди символа.
+    """
+    chunks: list[str] = []
+    rest = text or ""
+    while len(rest) > _TELEGRAM_MESSAGE_LIMIT:
+        cut = rest.rfind("\n", 0, _TELEGRAM_MESSAGE_LIMIT)
+        if cut <= 0:
+            cut = _TELEGRAM_MESSAGE_LIMIT
+        chunks.append(rest[:cut])
+        rest = rest[cut:].lstrip("\n")
+    chunks.append(rest)
+
     async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(f"{_API}/sendMessage", json={"chat_id": chat_id, "text": text[:4000]})
+        for chunk in chunks:
+            if not chunk:
+                continue
+            await client.post(
+                f"{_API}/sendMessage", json={"chat_id": chat_id, "text": chunk}
+            )
 
 
 async def _transcribe_voice(file_id: str) -> str:
@@ -109,10 +150,40 @@ async def _handle_update(update: dict) -> None:
 
         prefix = ""
         if voice:
+            # Распознавание — ПЛАТНЫЙ вызов Whisper нашим ключом, и раньше он
+            # шёл до единственной проверки: до ограничителя частоты, до
+            # потолков расхода, до проверки баланса (всё это живёт внутри
+            # run_chat_turn, строкой ниже). Человек с нулевым балансом мог
+            # слать голосовые бесконечно, счёт OpenAI рос, а в отчётах этого
+            # расхода не видно вовсе — usage_event на распознавание не
+            # создаётся.
+            #
+            # Стоимость распознавания по-прежнему НЕ биллится: для этого нужна
+            # строка цены за минуту аудио, которой в model_prices нет. Здесь
+            # закрыт бесплатный поток от того, кто заведомо не платит.
+            try:
+                await chatcore.ensure_can_spend(session, customer)
+            except billing.InsufficientBalance:
+                await send_message(
+                    chat_id,
+                    "Недостаточно средств на балансе — пополните в личном кабинете Flawless. "
+                    "Голосовые не распознаются, пока баланс пуст.",
+                )
+                return
+            except billing.SpendLimitExceeded as e:
+                await send_message(
+                    chat_id,
+                    f"Достигнут лимит расхода ({'дневной' if e.period == 'daily' else 'месячный'}): "
+                    f"потрачено {e.spent} ₽ из {e.limit} ₽. Лимит меняет администратор.",
+                )
+                return
+            except chatcore.TooManyRequests:
+                await send_message(chat_id, "Слишком часто — подождите немного и повторите.")
+                return
             try:
                 user_text = await _transcribe_voice(voice["file_id"])
             except Exception as e:
-                logger.warning("whisper transcription failed: %r", e)
+                logger.warning("whisper transcription failed: %s", safe_error(e))
                 await send_message(chat_id, "Не удалось распознать голосовое сообщение, попробуйте ещё раз.")
                 return
             prefix = f"🎙 Распознано: {user_text}\n\n"
@@ -165,7 +236,7 @@ async def poll_loop() -> None:
         bot_username = me.get("username")
         logger.info("telegram bot polling started (@%s)", bot_username)
     except Exception as e:
-        logger.warning("telegram getMe failed, continuing without known username: %r", e)
+        logger.warning("telegram getMe failed, continuing without known username: %s", safe_error(e))
 
     offset = None
     while True:
@@ -177,7 +248,7 @@ async def poll_loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning("telegram getUpdates failed: %r", e)
+            logger.warning("telegram getUpdates failed: %s", safe_error(e))
             await asyncio.sleep(5)
             continue
 

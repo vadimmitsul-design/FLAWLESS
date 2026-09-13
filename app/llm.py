@@ -57,6 +57,17 @@ def init_router() -> None:
     )
 
 
+def fallback_chain(alias: str) -> list[str]:
+    """Запрошенный алиас и его запасные, по порядку.
+
+    Нужна снаружи, чтобы считать резерв по САМОЙ ДОРОГОЙ модели цепочки:
+    фолбэк списывается по цене того, кто фактически ответил, а цепочка по
+    умолчанию ведёт самый дешёвый алиас на почти самый дорогой (×4,5 по
+    выводу), и запаса reserve_safety_margin на это не хватает.
+    """
+    return [alias] + list(_fallback_map.get(alias, []))
+
+
 def known_models() -> list[str]:
     return list(_alias_map.keys())
 

@@ -610,3 +610,162 @@ def _resource_by_id(resource_id):
             return await session.get(Resource, resource_id)
 
     return _get()
+
+
+# ---------- партия 4: резерв по цепочке, промпты, телеграм ----------
+
+
+def test_reserve_covers_the_most_expensive_model_in_the_chain(client, monkeypatch):
+    """Резерв брался по цене запрошенной модели, а списывается цена той, что
+    фактически ответила. Цепочка по умолчанию ведёт самый дешёвый алиас на
+    почти самый дорогой — ×4,5 по выводу, и запаса 1.5 на это не хватает."""
+    from datetime import datetime, timezone
+
+    from app.models import ModelPrice
+
+    async def _add_expensive_fallback():
+        async with SessionLocal() as session:
+            session.add(
+                ModelPrice(
+                    provider="openrouter",
+                    model="google/gemini-3.5-flash",
+                    price_per_1m_input_tokens=Decimal("1.50"),
+                    price_per_1m_output_tokens=Decimal("9.00"),
+                    valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                )
+            )
+            await session.commit()
+
+    async def _reserves():
+        async with SessionLocal() as session:
+            cfg = await billing.get_pricing_config(session)
+            messages = [{"role": "user", "content": "привет " * 50}]
+            extra = {"max_tokens": 4096}
+            chain = await billing.estimate_reserve_for_chain(
+                session, "gpt-5-mini", messages, extra, cfg, utcnow()
+            )
+            provider, model = llm.resolve_alias("gpt-5-mini")
+            own_price = await pricing.find_price(session, provider, model, None, None, utcnow())
+            own = billing.estimate_reserve_rub(own_price, messages, extra, cfg)
+            return chain, own
+
+    asyncio.run(_add_expensive_fallback())
+    try:
+        chain, own = asyncio.run(_reserves())
+        assert chain > own, "резерв не учитывает более дорогую запасную модель"
+    finally:
+        # Прайс общий на весь прогон: убираем за собой, иначе соседние тесты
+        # («claude-sonnet и gemini-flash без прайса») начнут падать.
+        async def _cleanup():
+            async with SessionLocal() as session:
+                row = (
+                    await session.execute(
+                        select(ModelPrice).where(ModelPrice.model == "google/gemini-3.5-flash")
+                    )
+                ).scalars().first()
+                if row is not None:
+                    await session.delete(row)
+                    await session.commit()
+
+        asyncio.run(_cleanup())
+
+
+def test_prompt_fee_counts_towards_the_spend_limit(client):
+    """Вся арифметика «сколько потрачено» построена на charged_rub. Пока
+    плата за промпт шла мимо, бюджетный потолок её не видел вовсе, а клиент
+    в кабинете видел почти нулевой расход при вычерпанном кошельке."""
+    from app.models import Prompt, UsageEvent as UE
+
+    _signup(client, "audit_promptfee@test.local")
+    payer = _customer("audit_promptfee@test.local")
+
+    async def _charge():
+        async with SessionLocal() as session:
+            author = Customer(email="audit_promptauthor@test.local", name="Автор", password_hash="x")
+            session.add(author)
+            await session.flush()
+            prompt = Prompt(
+                author_customer_id=author.id,
+                title="платный",
+                system_prompt="будь краток",
+                price_rub=Decimal("300.00"),
+            )
+            session.add(prompt)
+            event = UE(
+                customer_id=payer.id,
+                billing_customer_id=payer.id,
+                provider="openrouter",
+                model="openai/gpt-5-mini",
+                status="success",
+                charged_rub=Decimal("0.0100"),
+            )
+            session.add(event)
+            await session.flush()
+            person = await session.get(Customer, payer.id)
+            person.balance_rub = Decimal("5000.0000")
+            await session.commit()
+            await billing.charge_prompt_fee(session, payer.id, prompt, event.id)
+            refreshed = await session.get(UE, event.id)
+            return refreshed.charged_rub
+
+    charged = asyncio.run(_charge())
+    assert charged == Decimal("300.0100"), f"плата за промпт не попала в сумму события: {charged}"
+
+
+def test_telegram_never_writes_the_bot_token_into_logs():
+    """httpx кладёт в текст ошибки полный URL, а в URL Telegram токен стоит
+    прямо в пути — любой logger.warning(... %r, e) писал боевой токен в лог."""
+    from app import telegram_bot
+    from app.config import settings as app_settings
+
+    token = app_settings.telegram_bot_token
+    assert token, "тестовое окружение должно задавать токен"
+    leaked = RuntimeError(f"GET https://api.telegram.org/bot{token}/getUpdates failed")
+    assert token not in telegram_bot.safe_error(leaked)
+    assert "<ТОКЕН-СКРЫТ>" in telegram_bot.safe_error(leaked)
+
+
+def test_long_answers_are_sent_in_full_not_truncated(monkeypatch):
+    """text[:4000] молча отбрасывал хвост: человек платил за полный ответ,
+    получал обрубок на полуслове и не знал, что ответ продолжался."""
+    import asyncio as aio
+
+    from app import telegram_bot
+
+    sent = []
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            sent.append(json["text"])
+
+    monkeypatch.setattr(telegram_bot.httpx, "AsyncClient", lambda **kw: _FakeClient())
+
+    long_answer = "\n".join(f"строка номер {i}" for i in range(1, 900))
+    aio.run(telegram_bot.send_message(1, long_answer))
+
+    assert len(sent) > 1, "длинный ответ ушёл одним куском — значит обрезан"
+    assert all(len(chunk) <= 4000 for chunk in sent)
+    assert "строка номер 899" in "".join(sent), "хвост ответа потерян"
+
+
+def test_voice_is_not_transcribed_for_someone_who_cannot_pay(client):
+    """Распознавание — платный вызов Whisper нашим ключом, и он шёл до
+    единственной проверки: до ограничителя частоты, до потолков, до баланса."""
+    from app import chatcore
+
+    _signup(client, "audit_voice@test.local")
+    person = _customer("audit_voice@test.local")
+
+    async def _check():
+        async with SessionLocal() as session:
+            fresh = await session.get(Customer, person.id)
+            with pytest.raises(billing.InsufficientBalance):
+                await chatcore.ensure_can_spend(session, fresh)
+
+    asyncio.run(_check())

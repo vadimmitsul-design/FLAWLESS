@@ -4,10 +4,37 @@
 этого не поддерживает — просто задал вопрос и получил ответ)."""
 
 import time
+from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import billing, dlp, llm, pricing, ratelimit
+
+
+async def ensure_can_spend(session: AsyncSession, customer) -> None:
+    """Те же проверки, что делает run_chat_turn, но ДО платного действия.
+
+    Нужна там, где деньги тратятся раньше самого вызова модели: распознавание
+    голосового — платный вызов Whisper, и раньше он шёл вообще без проверок.
+    Бросает те же исключения, что и run_chat_turn, чтобы вызывающий показывал
+    человеку один и тот же текст.
+    """
+    # Тот же ключ ведёрка, что и у run_chat_turn: на голых строках ключи
+    # уже расходились однажды («key:5» против «customer:5»). Голосовое
+    # сообщение съедает ДВА слота — распознавание и сам вызов модели — и это
+    # верно: это два платных обращения, а не одно.
+    if not ratelimit.check(ratelimit.customer_bucket(customer.id)):
+        raise TooManyRequests()
+    from app.models import Customer  # локальный импорт — избежать цикла на уровне модуля
+
+    billing_customer_id = billing.resolve_billing_customer_id(customer)
+    await billing.check_spend_limits(session, billing_customer_id)
+    payer = await session.get(Customer, billing_customer_id)
+    if payer is None:
+        raise billing.InsufficientBalance(Decimal(0))
+    available = await billing.available_balance(session, billing_customer_id, payer.balance_rub)
+    if available <= 0:
+        raise billing.InsufficientBalance(available)
 
 
 class EmptyProviderResponse(Exception):
@@ -55,8 +82,8 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     # telegram_bot показывает это человеку понятным текстом.
     estimate_price = await billing.price_for_call(session, provider, model, utcnow())
     call_extra = pricing.clamp_output_tokens({})
-    reserve_rub = billing.estimate_reserve_rub(
-        estimate_price, redacted_messages, call_extra, pricing_cfg
+    reserve_rub = await billing.estimate_reserve_for_chain(
+        session, model_alias, redacted_messages, call_extra, pricing_cfg, utcnow()
     )
 
     event = await billing.start_call(
