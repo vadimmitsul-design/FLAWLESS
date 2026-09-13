@@ -57,7 +57,10 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     started = time.monotonic()
     try:
         used_alias, provider, model, response = await llm.chat_completion_with_fallback(
-            model_alias, redacted_messages, **call_extra
+            model_alias,
+            redacted_messages,
+            allowed_aliases=await llm.priced_aliases(session, utcnow()),
+            **call_extra,
         )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)

@@ -223,6 +223,16 @@ def test_fallback_to_backup_model_on_provider_error(client, monkeypatch):
 
     monkeypatch.setattr(llm, "chat_completion", flaky_chat_completion)
 
+    # В тестовом прайсе засеян только gpt-5-mini, а фолбэк теперь не уходит на
+    # модель без цены (иначе вызов проходит бесплатно за наш счёт). Здесь
+    # проверяется САМ механизм подмены модели, поэтому цену считаем
+    # действующей у обеих; отказ от непроценённого фолбэка проверяется
+    # отдельно в test_audit_fixes.py.
+    async def _both_priced(session, now):
+        return {"gpt-5-mini", "gemini-flash"}
+
+    monkeypatch.setattr(llm, "priced_aliases", _both_priced)
+
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},

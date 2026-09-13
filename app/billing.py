@@ -14,7 +14,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -331,8 +331,13 @@ async def finalize_success(
     provider_request_id: str | None,
     response_snapshot: str | None = None,
     response_status_code: int | None = None,
+    billing_estimated: bool = False,
 ) -> Decimal:
     """Транзакция 2 (успех): списать по факту, вернуть новый баланс.
+
+    billing_estimated=True — цифры не подтверждены поставщиком, а посчитаны
+    нами по тексту ответа (провайдер не прислал usage). Пометка нужна сверке:
+    иначе оценку не отличить от подтверждённых данных.
     response_snapshot/response_status_code — для идемпотентного повтора
     (1.4 доработок): main.py передаёт JSON тела ответа, чтобы вернуть его же
     клиенту при повторе с тем же Idempotency-Key, не вызывая провайдера снова."""
@@ -343,6 +348,7 @@ async def finalize_success(
     event.cache_write_tokens = usage.cache_write_tokens
     event.output_tokens = usage.output_tokens
     event.cost_usd = cost_usd
+    event.billing_estimated = billing_estimated
     event.price_id = price_id
     event.litellm_cost = Decimal(str(litellm_cost)) if litellm_cost is not None else None
     event.markup_percent = pricing_cfg.markup_percent
@@ -431,11 +437,28 @@ async def finalize_failure(
     return None
 
 
-async def confirm_topup(session: AsyncSession, topup: TopupRequest, admin_id: int) -> Decimal:
+async def confirm_topup(
+    session: AsyncSession, topup: TopupRequest, admin_id: int
+) -> Decimal | None:
+    """Зачислить деньги по заявке. None — заявку уже кто-то решил.
+
+    Переход статуса делается атомарным UPDATE с условием, а не присваиванием:
+    проверка «ещё requested» в маршруте и запись здесь — это два разных
+    момента, и между ними помещается точно такой же второй запрос (двойной
+    клик по кнопке, две вкладки админки, два администратора). Оба увидели бы
+    requested, оба прошли бы проверку, и клиенту зачислилось бы вдвое больше,
+    чем он перевёл. Тем же приёмом гасятся одноразовые коды приглашений.
+    """
+    claimed = await session.execute(
+        update(TopupRequest)
+        .where(TopupRequest.id == topup.id, TopupRequest.status == "requested")
+        .values(status="confirmed", decided_at=utcnow(), decided_by_admin_id=admin_id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        await session.rollback()
+        return None
     customer = await session.get(Customer, topup.customer_id, with_for_update=True)
-    topup.status = "confirmed"
-    topup.decided_at = utcnow()
-    topup.decided_by_admin_id = admin_id
     session.add(
         WalletLedger(
             customer_id=customer.id,
@@ -449,12 +472,20 @@ async def confirm_topup(session: AsyncSession, topup: TopupRequest, admin_id: in
     return customer.balance_rub
 
 
-async def reject_topup(session: AsyncSession, topup: TopupRequest, admin_id: int) -> None:
-    topup.status = "rejected"
-    topup.decided_at = utcnow()
-    topup.decided_by_admin_id = admin_id
-    session.add(topup)
+async def reject_topup(session: AsyncSession, topup: TopupRequest, admin_id: int) -> bool:
+    """False — заявку уже решили. Та же гонка, что у подтверждения: отказ и
+    зачисление, нажатые одновременно, иначе сделали бы и то, и другое."""
+    claimed = await session.execute(
+        update(TopupRequest)
+        .where(TopupRequest.id == topup.id, TopupRequest.status == "requested")
+        .values(status="rejected", decided_at=utcnow(), decided_by_admin_id=admin_id)
+        .execution_options(synchronize_session=False)
+    )
+    if claimed.rowcount != 1:
+        await session.rollback()
+        return False
     await session.commit()
+    return True
 
 
 async def admin_adjust_balance(

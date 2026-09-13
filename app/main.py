@@ -2082,9 +2082,14 @@ async def admin_confirm_topup(
     if redirect is not None:
         return redirect
     topup = await session.get(TopupRequest, topup_id)
-    if topup is None or topup.status != "requested":
+    if topup is None:
         raise HTTPException(status_code=404)
-    await billing.confirm_topup(session, topup, admin_id=customer.id)
+    # 409, а не 404: администратор, нажавший второй раз, должен понять, что
+    # решение уже принято, а не гадать, зачислились ли деньги.
+    if topup.status != "requested":
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
+    if await billing.confirm_topup(session, topup, admin_id=customer.id) is None:
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
     return RedirectResponse("/admin/topups", status_code=303)
 
 
@@ -2098,9 +2103,12 @@ async def admin_reject_topup(
     if redirect is not None:
         return redirect
     topup = await session.get(TopupRequest, topup_id)
-    if topup is None or topup.status != "requested":
+    if topup is None:
         raise HTTPException(status_code=404)
-    await billing.reject_topup(session, topup, admin_id=customer.id)
+    if topup.status != "requested":
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
+    if not await billing.reject_topup(session, topup, admin_id=customer.id):
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
     return RedirectResponse("/admin/topups", status_code=303)
 
 
@@ -2723,9 +2731,29 @@ def _prepare_messages(customer: Customer, messages: list[dict], prompt: Prompt |
 _ALLOWED_EXTRA_PARAMS = {
     "temperature", "top_p", "max_tokens", "max_completion_tokens",
     "presence_penalty", "frequency_penalty", "stop", "stream",
-    "stream_options", "n", "seed", "response_format", "tools", "tool_choice",
-    "user", "logprobs", "top_logprobs", "mock_response",
+    "n", "seed", "response_format", "tools", "tool_choice",
+    "user", "logprobs", "top_logprobs",
 }
+# stream_options СОЗНАТЕЛЬНО убран из списка: единственное, что там есть, —
+# include_usage, а выключенный include_usage означает, что провайдер не
+# пришлёт финальный usage-чанк. Без usage цена не считается, charged_rub
+# остаётся NULL, записи в журнал нет — вызов проходит БЕСПЛАТНО при
+# полностью реальном расходе у поставщика. Клиенту здесь нечего настраивать:
+# сервер ставит include_usage сам и безусловно.
+#
+# mock_response — тестовый параметр LiteLLM: провайдер не вызывается вовсе,
+# ответ выдумывается на месте. В тестах он нужен, в проде это способ получить
+# «ответ» и заплатить за него настоящими деньгами при нулевой себестоимости.
+# Проверяется на КАЖДОМ запросе, а не один раз при импорте: иначе смена
+# ENVIRONMENT требовала бы пересборки образа, а проверить это тестом было бы
+# нечем.
+_DEV_ONLY_EXTRA_PARAMS = {"mock_response"}
+
+
+def _allowed_extra_params() -> set[str]:
+    if settings.environment == "production":
+        return _ALLOWED_EXTRA_PARAMS
+    return _ALLOWED_EXTRA_PARAMS | _DEV_ONLY_EXTRA_PARAMS
 
 
 def _idempotency_request_hash(model: str, messages: list, prompt_id: int | None) -> str:
@@ -2872,10 +2900,11 @@ async def chat_completions(
             },
         )
 
+    allowed_params = _allowed_extra_params()
     extra = {
         k: v
         for k, v in body.model_dump(exclude={"model", "messages", "prompt_id"}).items()
-        if k in _ALLOWED_EXTRA_PARAMS
+        if k in allowed_params
     }
     # Предел длины ответа зажимаем ДО расчёта резерва: обе величины читают
     # один и тот же extra, поэтому оценка и факт сходятся по построению.
@@ -3023,7 +3052,10 @@ async def chat_completions(
     started = time.monotonic()
     try:
         used_alias, provider, model, response = await llm.chat_completion_with_fallback(
-            body.model, messages, **extra
+            body.model,
+            messages,
+            allowed_aliases=await llm.priced_aliases(session, utcnow()),
+            **extra,
         )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -3110,7 +3142,10 @@ async def _stream_chat_completion(
     пока статус не изменится)."""
     stream_kwargs = dict(extra)
     stream_kwargs["stream"] = True
-    stream_kwargs.setdefault("stream_options", {"include_usage": True})
+    # НЕ setdefault: клиентское значение побеждало бы, а {"include_usage": false}
+    # отключает финальный usage-чанк и делает вызов бесплатным (см. комментарий
+    # у _ALLOWED_EXTRA_PARAMS).
+    stream_kwargs["stream_options"] = {"include_usage": True}
 
     pricing_cfg = await billing.get_pricing_config(session)
     started = time.monotonic()
@@ -3152,7 +3187,10 @@ async def _stream_chat_completion(
     try:
         try:
             used_alias, provider, model, stream = await llm.chat_completion_with_fallback(
-                alias, messages, **stream_kwargs
+                alias,
+                messages,
+                allowed_aliases=await llm.priced_aliases(session, utcnow()),
+                **stream_kwargs,
             )
         except Exception as e:
             logger.warning("provider stream failed to start for event %s (incl. fallback chain): %r", event.id, e)
@@ -3199,9 +3237,26 @@ async def _stream_chat_completion(
         latency_ms = int((time.monotonic() - started) * 1000)
         price = await pricing.find_price(session, provider, model, None, None, event.created_at)
         cost_usd = pricing.compute_cost(price, usage)
+        billing_estimated = False
+        if cost_usd is None and price is not None and content_so_far:
+            # Второй рубеж: провайдер ответил, но usage не прислал. Закрывать
+            # событие бесплатно нельзя — расход у поставщика реальный. Считаем
+            # по тексту, который фактически ушёл клиенту, тем же способом, что
+            # и при обрыве соединения, и помечаем событие оценочным: иначе
+            # сверка не отличит оценку от подтверждённых поставщиком цифр.
+            usage = pricing.UsageAmounts(
+                input_text_tokens=pricing.estimate_messages_tokens(messages),
+                output_tokens=pricing.estimate_tokens_from_text(content_so_far),
+            )
+            cost_usd = pricing.compute_cost(price, usage)
+            billing_estimated = cost_usd is not None
+            logger.warning(
+                "streamed event %s finished without usage from provider — billed by estimate",
+                event.id,
+            )
         if cost_usd is None:
             logger.warning(
-                "no cost computed for streamed event %s (%s/%s): check model_prices coverage or stream_options.include_usage support",
+                "no cost computed for streamed event %s (%s/%s): check model_prices coverage",
                 event.id, provider, model,
             )
         await billing.finalize_success(
@@ -3209,6 +3264,7 @@ async def _stream_chat_completion(
             event,
             usage=usage,
             cost_usd=cost_usd,
+            billing_estimated=billing_estimated,
             price_id=price.id if price else None,
             litellm_cost=None,
             pricing_cfg=pricing_cfg,
@@ -3475,7 +3531,10 @@ async def web_chat_send(
     started = time.monotonic()
     try:
         _, resp_provider, resp_model, response = await llm.chat_completion_with_fallback(
-            model, prepared_messages, **call_extra
+            model,
+            prepared_messages,
+            allowed_aliases=await llm.priced_aliases(session, utcnow()),
+            **call_extra,
         )
     except Exception as e:
         latency_ms = int((time.monotonic() - started) * 1000)

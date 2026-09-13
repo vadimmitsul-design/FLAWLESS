@@ -150,11 +150,20 @@ def clamp_output_tokens(extra: dict) -> dict:
 def estimate_output_tokens_hint(extra: dict) -> int:
     """max_tokens/max_completion_tokens клиента, если задан и осмыслен —
     иначе консервативный дефолт (лучше зарезервировать с запасом и изредка
-    отказать легитимному длинному ответу, чем недорезервировать)."""
+    отказать легитимному длинному ответу, чем недорезервировать).
+
+    Умножается на n — число вариантов ответа. Оплачиваются ВСЕ варианты, а
+    потолок длины (clamp_output_tokens) режет каждый по отдельности: без
+    множителя клиент с n=10 резервировал бы десятую часть того, что спишется,
+    и уводил баланс в минус ровно во столько же раз.
+    """
     hint = extra.get("max_tokens") or extra.get("max_completion_tokens")
-    if isinstance(hint, int) and hint > 0:
-        return hint
-    return settings.default_max_output_tokens_estimate
+    if not (isinstance(hint, int) and hint > 0):
+        hint = settings.default_max_output_tokens_estimate
+    variants = extra.get("n")
+    if isinstance(variants, int) and variants > 1:
+        hint *= variants
+    return hint
 
 
 def estimate_call_cost_usd(price: ModelPrice | None, messages: list[dict], extra: dict) -> Decimal | None:

@@ -12,7 +12,7 @@ import yaml
 from litellm import Router
 
 from app.config import settings
-from app.pricing import UsageAmounts
+from app.pricing import UsageAmounts, find_price
 
 litellm.drop_params = True  # молча отбрасывать параметры, которые модель не знает
 
@@ -61,6 +61,21 @@ def known_models() -> list[str]:
     return list(_alias_map.keys())
 
 
+async def priced_aliases(session: Any, now: Any) -> set[str]:
+    """Алиасы с действующей строкой цены — те, которые можно забиллить.
+
+    Живёт здесь, а не в main.py: реестр алиасов принадлежит этому модулю, а
+    список нужен всем четырём дверям (API, стрим, веб-чат, Telegram), и
+    тянуть его через main.py означало бы кольцевой импорт из chatcore.
+    """
+    allowed: set[str] = set()
+    for candidate, (provider, model) in _alias_map.items():
+        price = await find_price(session, provider, model, None, None, now)
+        if price is not None and price.price_per_1m_input_tokens is not None:
+            allowed.add(candidate)
+    return allowed
+
+
 def alias_for(provider: str, model: str) -> str | None:
     """(provider, model) -> алиас, если такая модель есть в реестре.
 
@@ -88,7 +103,7 @@ async def chat_completion(alias: str, messages: list[dict], **kwargs: Any):
 
 
 async def chat_completion_with_fallback(
-    alias: str, messages: list[dict], **kwargs: Any
+    alias: str, messages: list[dict], allowed_aliases: set[str] | None = None, **kwargs: Any
 ) -> tuple[str, str, str, Any]:
     """Пробует alias, при ошибках уровня провайдера (rate limit/timeout/5xx) —
     по очереди алиасы из fallback-цепочки config/models.yaml. Возвращает
@@ -98,6 +113,14 @@ async def chat_completion_with_fallback(
     чтобы точно знать, какая модель реально ответила, для корректного учёта.
     """
     chain = [alias] + _fallback_map.get(alias, [])
+    if allowed_aliases is not None:
+        # Цена проверяется только для ЗАПРОШЕННОЙ модели, а списание идёт по
+        # фактически ответившей. Фолбэк на модель без действующей строки цены
+        # давал бесплатный вызов за наш счёт: cost_usd=None -> charged_rub=NULL,
+        # ни списания, ни записи в журнал, при полностью реальном расходе у
+        # поставщика. Запрошенная модель остаётся в цепочке всегда — её цену
+        # уже проверил вызывающий (billing.price_for_call).
+        chain = [c for i, c in enumerate(chain) if i == 0 or c in allowed_aliases]
     last_exc: Exception | None = None
     for candidate in chain:
         try:
