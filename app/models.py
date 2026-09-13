@@ -531,3 +531,42 @@ class ResourcePayment(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now()
     )
+
+
+class ResourceRequest(Base):
+    """Заявка сотрудника: «мне нужна подписка / прокси».
+
+    Полный цикл вместо справочника: сотрудник просит → администратор
+    оплачивает картой у поставщика → фиксирует факт → заявка превращается
+    в `Resource` со сроком, и дальше за сроком следит система.
+
+    Заявка и ресурс — разные вещи. Заявка это намерение, её можно отклонить,
+    и она остаётся в истории как отказ. Ресурс — то, что реально куплено и
+    что кончается. Связь хранится на заявке: одна заявка порождает максимум
+    один ресурс.
+    """
+
+    __tablename__ = "resource_requests"
+
+    STATUSES = ("requested", "rejected", "fulfilled")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    kind: Mapped[str] = mapped_column(Text, default="subscription", server_default="subscription")
+    name: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(Text)
+    # На какой аккаунт оформлять. Для подписок это главное поле: администратор
+    # оплачивает картой внутри уже существующего аккаунта сотрудника.
+    account: Mapped[str | None] = mapped_column(Text)
+    period_months: Mapped[int | None] = mapped_column(Integer)
+    estimated_amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(Text, default="RUB", server_default="RUB")
+    reason: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="requested", server_default="requested")
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    decided_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resource_id: Mapped[int | None] = mapped_column(ForeignKey("resources.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )

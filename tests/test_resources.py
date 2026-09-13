@@ -20,7 +20,14 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.db import SessionLocal
-from app.models import Customer, Resource, ResourcePayment, WalletLedger, as_utc
+from app.models import (
+    Customer,
+    Resource,
+    ResourcePayment,
+    ResourceRequest,
+    WalletLedger,
+    as_utc,
+)
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -346,3 +353,182 @@ def test_section_disappears_from_the_menu_when_off(client, monkeypatch):
     assert "/resources" in client.get("/").text
     monkeypatch.setattr(settings, "enable_resources", False)
     assert "/resources" not in client.get("/").text
+
+
+# ---------- цикл заявки: сотрудник просит, администратор оплачивает ----------
+
+
+def _login(client, email, password="TestPass123"):
+    r = client.post("/login", data={"email": email, "password": password})
+    assert r.status_code in (200, 303)
+
+
+def _ask(client, name, **over):
+    data = {
+        "kind": "subscription",
+        "name": name,
+        "provider": "OpenAI",
+        "account": "user@company.test",
+        "period_months": "1",
+        "estimated_amount": "2000",
+        "reason": "нужно для работы",
+    }
+    data.update(over)
+    r = client.post("/resources/request", data=data)
+    assert r.status_code in (200, 303), r.text
+
+    async def _find():
+        async with SessionLocal() as session:
+            return (
+                await session.execute(
+                    select(ResourceRequest).where(ResourceRequest.name == name)
+                )
+            ).scalar_one()
+
+    return asyncio.run(_find())
+
+
+def test_employee_request_reaches_the_admin_queue(client):
+    """Смысл заявки в том, что администратор не угадывает, кому что нужно."""
+    _signup(client, "req_new@test.local", name="Сидоров")
+    _login(client, "req_new@test.local")
+    _ask(client, "Подписка для Сидорова")
+
+    assert "Подписка для Сидорова" in client.get("/resources").text
+    admin_page = _admin_client().get("/admin/resources").text
+    assert "Подписка для Сидорова" in admin_page
+    assert "Сидоров" in admin_page, "не видно, кто просит"
+
+
+def test_employee_sees_only_own_requests(client):
+    _signup(client, "req_a@test.local")
+    _signup(client, "req_b@test.local")
+    _login(client, "req_a@test.local")
+    _ask(client, "Заявка первого")
+    _login(client, "req_b@test.local")
+    _ask(client, "Заявка второго")
+
+    page = client.get("/resources").text
+    assert "Заявка второго" in page
+    assert "Заявка первого" not in page, "видна чужая заявка"
+
+
+def test_fulfilling_creates_a_resource_for_the_requester(client):
+    """Оплатили — заявка превращается в ресурс со сроком, владелец тот, кто
+    просил, а не администратор, который платил."""
+    _signup(client, "req_ok@test.local", name="Иванов")
+    owner = _customer("req_ok@test.local")
+    _login(client, "req_ok@test.local")
+    req = _ask(client, "ChatGPT Plus для Иванова")
+
+    admin = _admin_client()
+    r = admin.post(
+        f"/admin/resource-requests/{req.id}/fulfil",
+        data={"amount": "2400", "currency": "RUB", "period_end": _day(30),
+              "url": "https://chat.openai.test", "decision_note": "оплатил картой"},
+    )
+    assert r.status_code in (200, 303)
+
+    async def _state():
+        async with SessionLocal() as session:
+            fresh = await session.get(ResourceRequest, req.id)
+            res = await session.get(Resource, fresh.resource_id) if fresh.resource_id else None
+            pays = (
+                await session.execute(
+                    select(ResourcePayment).where(ResourcePayment.resource_id == fresh.resource_id)
+                )
+            ).scalars().all()
+            return fresh.status, res, pays
+
+    status, resource, pays = asyncio.run(_state())
+    assert status == "fulfilled"
+    assert resource is not None, "ресурс не создан"
+    assert resource.owner_customer_id == owner.id, "ресурс достался не тому, кто просил"
+    assert resource.name == "ChatGPT Plus для Иванова"
+    assert resource.account == "user@company.test", "аккаунт из заявки потерян"
+    assert len(pays) == 1 and pays[0].amount == Decimal("2400.00")
+
+    # и сотрудник видит его у себя со сроком
+    _login(client, "req_ok@test.local")
+    mine = client.get("/resources").text
+    assert "ChatGPT Plus для Иванова" in mine
+    assert "оплачена" in mine
+
+
+def test_rejection_keeps_the_reason_visible_to_the_employee(client):
+    """Отказ без причины заставляет подавать то же самое снова."""
+    _signup(client, "req_no@test.local")
+    _login(client, "req_no@test.local")
+    req = _ask(client, "Ненужная подписка")
+
+    admin = _admin_client()
+    admin.post(
+        f"/admin/resource-requests/{req.id}/reject",
+        data={"decision_note": "есть общий корпоративный доступ"},
+    )
+
+    _login(client, "req_no@test.local")
+    page = client.get("/resources").text
+    assert "отклонена" in page
+    assert "есть общий корпоративный доступ" in page
+
+    async def _no_resource():
+        async with SessionLocal() as session:
+            fresh = await session.get(ResourceRequest, req.id)
+            return fresh.resource_id
+
+    assert asyncio.run(_no_resource()) is None, "отклонённая заявка создала ресурс"
+
+
+def test_a_decided_request_cannot_be_decided_again(client):
+    """Иначе двойной клик по «Оплачено» заводит два ресурса и два платежа."""
+    _signup(client, "req_twice@test.local")
+    _login(client, "req_twice@test.local")
+    req = _ask(client, "Подписка для двойного клика")
+
+    admin = _admin_client()
+    first = admin.post(
+        f"/admin/resource-requests/{req.id}/fulfil",
+        data={"amount": "100", "currency": "RUB", "period_end": _day(30)},
+    )
+    assert first.status_code in (200, 303)
+    second = admin.post(
+        f"/admin/resource-requests/{req.id}/fulfil",
+        data={"amount": "100", "currency": "RUB", "period_end": _day(30)},
+    )
+    assert second.status_code == 409
+    assert admin.post(
+        f"/admin/resource-requests/{req.id}/reject", data={"decision_note": "поздно"}
+    ).status_code == 409
+
+    async def _count():
+        async with SessionLocal() as session:
+            return len(
+                (
+                    await session.execute(
+                        select(Resource).where(Resource.name == "Подписка для двойного клика")
+                    )
+                ).scalars().all()
+            )
+
+    assert asyncio.run(_count()) == 1, "двойное решение завело второй ресурс"
+
+
+def test_request_input_is_validated(client):
+    _signup(client, "req_bad@test.local")
+    _login(client, "req_bad@test.local")
+    assert client.post("/resources/request", data={"kind": "nonsense", "name": "x"}).status_code == 400
+    assert client.post("/resources/request", data={"kind": "proxy", "name": "  "}).status_code == 400
+    assert client.post("/resources/request", data={
+        "kind": "proxy", "name": "ok", "period_months": "0"}).status_code == 400
+    assert client.post("/resources/request", data={
+        "kind": "proxy", "name": "ok", "estimated_amount": "-5"}).status_code == 400
+    assert client.post("/resources/request", data={
+        "kind": "proxy", "name": "ok", "estimated_amount": "вагон"}).status_code == 400
+
+
+def test_requests_are_off_with_the_section(client, monkeypatch):
+    _signup(client, "req_flag@test.local")
+    _login(client, "req_flag@test.local")
+    monkeypatch.setattr(settings, "enable_resources", False)
+    assert client.post("/resources/request", data={"kind": "proxy", "name": "x"}).status_code == 404

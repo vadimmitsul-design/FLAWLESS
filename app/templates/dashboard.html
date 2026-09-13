@@ -28,6 +28,37 @@
     font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-0.02em;}
   .fig span{display:block;font-size:12px;color:var(--text-faint);margin-top:5px;line-height:1.35;}
 
+  /* ─── первый запуск ───
+     Страница рисовалась под аккаунт с данными: на чистой базе оставались
+     четыре нуля и широкая пустая полоса под график, который нечем
+     заполнить. А это первый экран, который видит новый сотрудник — он
+     должен объяснять, что делать, а не выглядеть сломанным. */
+  .start{border-top:2px solid var(--text);padding-top:22px;margin-top:30px;}
+  .start h2{font-size:17px;margin-bottom:6px;}
+  .start > p{font-size:14px;color:var(--text-dim);margin:0 0 22px;max-width:64ch;}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:26px;}
+  .step{display:grid;grid-template-columns:auto 1fr;gap:0 14px;align-items:start;}
+  .step .n{font-family:'Nunito',ui-sans-serif,sans-serif;font-style:italic;font-weight:900;
+    font-size:30px;line-height:1;color:var(--brand);}
+  .step.done .n{color:var(--accent-2);}
+  .step h3{font-size:16px;margin:0 0 6px;}
+  .step p{grid-column:2;font-size:14px;line-height:1.6;color:var(--text-dim);margin:0;}
+  .step .act{grid-column:2;margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;}
+  .step .ok{grid-column:2;font-size:13px;color:var(--accent-2);font-weight:600;margin-top:8px;}
+
+  /* Карта разделов. Нужна ровно один раз — пока человек не освоился;
+     дальше она превращается в шум, поэтому живёт внутри блока первого
+     запуска и исчезает вместе с ним. */
+  .map{margin-top:34px;padding-top:22px;border-top:1px solid var(--border);}
+  .map-title{font-size:11.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--text-faint);margin-bottom:14px;}
+  .map-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;}
+  .map-grid a{display:block;padding:13px 15px;border:1px solid var(--border);border-radius:11px;
+    background:var(--surface);transition:border-color .16s ease, transform .16s ease;}
+  .map-grid a:hover{border-color:var(--brand);transform:translateY(-1px);}
+  .map-grid b{display:block;font-size:14.5px;color:var(--text);margin-bottom:4px;}
+  .map-grid span{font-size:13px;line-height:1.5;color:var(--text-dim);}
+
   /* ─── график расхода ─── */
   .chart-box{padding:30px 0 6px;}
   .chart-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
@@ -121,6 +152,7 @@
       </div>
     </div>
 
+    {% if spend.calls %}
     <div class="figs">
       <div class="fig">
         <b>{{ spend.total|money }}&nbsp;₽</b>
@@ -139,8 +171,10 @@
         <span>токенов</span>
       </div>
     </div>
+    {% endif %}
   </div>
 
+  {% if spend.total %}
   <div class="chart-box">
     <div class="chart-head">
       <h2>Расход по дням</h2>
@@ -167,6 +201,7 @@
     <div class="chart-empty">Пока нечего показывать — график появится после первых вызовов.</div>
     {% endif %}
   </div>
+  {% endif %}
 
   {% if spend.daily_limit or spend.monthly_limit %}
   <div class="caps">
@@ -196,6 +231,93 @@
       </div>
     </div>
     {% endif %}
+  </div>
+  {% endif %}
+
+  {% if not events and not api_keys %}
+  <div class="start">
+    <h2>Что это и с чего начать</h2>
+    <p>
+      Flawless — общий доступ к нейросетям: пишете в чат или подключаете API-ключ
+      к своему коду, деньги списываются с баланса по факту использованных токенов.
+      {% if features.enable_resources %}Здесь же учитывается то, что компания покупает по подписке —
+      прокси, сервисы, доступы: видно, до какого числа оплачено, и можно
+      запросить новое.{% endif %}
+      Аккаунт только заведён, поэтому пока нули: три шага, и расход начнёт
+      появляться на этой же странице.
+    </p>
+    <div class="steps">
+      <div class="step {% if customer.balance_rub > 0 %}done{% endif %}">
+        <div class="n">01</div>
+        <div><h3>Бюджет на балансе</h3></div>
+        <p>
+          {% if customer.balance_rub > 0 %}
+            На балансе {{ customer.balance_rub|money }}&nbsp;₽ — этого хватит на первые вызовы.
+          {% elif customer.role == 'admin' %}
+            Начислите себе или сотруднику сумму в разделе «Люди»: там же ставится
+            дневной и месячный потолок расхода.
+          {% else %}
+            Баланс пуст. Попросите администратора начислить бюджет — или подайте
+            заявку на пополнение ниже.
+          {% endif %}
+        </p>
+        {% if customer.balance_rub > 0 %}
+        <div class="ok">✓ готово</div>
+        {% else %}
+        <div class="act">
+          {% if customer.role == 'admin' %}
+          <a href="/admin/customers" class="u-btn u-btn-primary u-btn-sm">Начислить бюджет</a>
+          {% else %}
+          <a href="#topup" class="u-btn u-btn-primary u-btn-sm">Подать заявку</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="step">
+        <div class="n">02</div>
+        <div><h3>API-ключ</h3></div>
+        <p>
+          Ключ показывается один раз. Заведите отдельный на каждую интеграцию
+          и поставьте ему лимит — тогда утечка одного не съест весь баланс.
+        </p>
+        <div class="act">
+          <a href="#keys" class="u-btn u-btn-ghost u-btn-sm">Создать ключ</a>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="n">03</div>
+        <div><h3>Первый запрос</h3></div>
+        <p>
+          Подставьте ключ и адрес в любой OpenAI-совместимый клиент — или
+          спросите что-нибудь прямо в чате, без единой строки кода.
+        </p>
+        <div class="act">
+          <a href="/chat" class="u-btn u-btn-ghost u-btn-sm">Открыть чат</a>
+          <a href="/docs" class="u-btn u-btn-ghost u-btn-sm">Быстрый старт</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="map">
+      <div class="map-title">Что где</div>
+      <div class="map-grid">
+        <a href="/"><b>Кабинет</b><span>Баланс, расход по дням, история вызовов и ваши API-ключи</span></a>
+        <a href="/chat"><b>Чат</b><span>Спросить модель без кода. Списывается с того же баланса</span></a>
+        {% if features.enable_resources %}
+        <a href="/resources"><b>Ресурсы</b><span>Прокси и подписки, закреплённые за вами, до какого числа оплачены — и заявка, если нужно новое</span></a>
+        {% endif %}
+        <a href="/docs"><b>Документация</b><span>Как подключить ключ к своему коду, Cursor или OpenWebUI</span></a>
+        {% if customer.role == 'admin' %}
+        <a href="/admin/customers"><b>Админка → Люди</b><span>Начислить бюджет, поставить потолок расхода, отключить доступ</span></a>
+        <a href="/admin/invites"><b>Админка → Приглашения</b><span>Одноразовые коды: с улицы аккаунт здесь не завести</span></a>
+        {% if features.enable_resources %}
+        <a href="/admin/resources"><b>Админка → Ресурсы и сроки</b><span>Заявки сотрудников, что оплачено и когда кончается</span></a>
+        {% endif %}
+        {% endif %}
+      </div>
+    </div>
   </div>
   {% endif %}
 
@@ -298,7 +420,7 @@
     </div>
 
     <div>
-      <div class="blk">
+      <div class="blk" id="keys">
         <div class="blk-head"><h2>API-ключи</h2></div>
         <p class="blk-note">
           Заведите отдельный ключ на каждую интеграцию и поставьте ему лимит:

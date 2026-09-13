@@ -35,7 +35,12 @@
         {% if m.attachment_name %}<div class="muted" style="font-size:11.5px;margin-top:4px;">📎 {{ m.attachment_name }}</div>{% endif %}
       </div>
       {% else %}
-      <p class="muted" style="text-align:center;margin-top:40px;">Задайте вопрос любой из подключённых моделей — GPT, Claude или Gemini.</p>
+      <div class="muted" style="text-align:center;margin:48px auto 0;max-width:44ch;line-height:1.65;">
+        <div style="font-weight:700;color:var(--text);font-size:15.5px;margin-bottom:8px;">Спросите что-нибудь</div>
+        Модель выбирается сверху, ответ списывается с вашего баланса по факту
+        использованных токенов — сумма видна в истории вызовов в кабинете.
+        Можно приложить картинку или текстовый файл.
+      </div>
       {% endfor %}
     </div>
 

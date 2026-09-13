@@ -12,7 +12,7 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import litellm
@@ -41,6 +41,7 @@ from app.models import (  # noqa: F401  as_utc используется в ра�
     Prompt,
     Resource,
     ResourcePayment,
+    ResourceRequest,
     as_utc,
     SubscriptionOrder,
     TelegramLink,
@@ -854,15 +855,84 @@ async def my_resources(
     """Сотрудник видит только свои ресурсы — они закреплены за человеком."""
     if customer is None:
         return RedirectResponse("/login", status_code=303)
+    my_requests = (
+        await session.execute(
+            select(ResourceRequest)
+            .where(ResourceRequest.customer_id == customer.id)
+            .order_by(ResourceRequest.created_at.desc())
+            .limit(20)
+        )
+    ).scalars().all()
     return templates.TemplateResponse(
         request,
         "resources.html",
         {
             "customer": customer,
             "items": await _resources_with_state(session, owner_id=customer.id),
+            "requests": my_requests,
+            "kinds": Resource.KINDS,
+            "kind_titles": _RESOURCE_KIND_TITLES,
             "warn_days": settings.resource_expiry_warn_days,
         },
     )
+
+
+@app.post("/resources/request", dependencies=[Depends(_feature_resources)])
+async def request_resource(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    kind: str = Form("subscription"),
+    name: str = Form(...),
+    provider: str = Form(""),
+    account: str = Form(""),
+    period_months: str = Form(""),
+    estimated_amount: str = Form(""),
+    reason: str = Form(""),
+):
+    """Заявку подаёт сам сотрудник — в этом и смысл: администратор не должен
+    угадывать, кому что нужно."""
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    if kind not in Resource.KINDS:
+        raise HTTPException(status_code=400, detail=f"неизвестный вид: {kind}")
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="опишите, что именно нужно")
+
+    def _positive_int(raw: str, field: str) -> int | None:
+        if not raw.strip():
+            return None
+        try:
+            value = int(raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"{field}: нужно число")
+        if value <= 0:
+            raise HTTPException(status_code=400, detail=f"{field}: должно быть больше нуля")
+        return value
+
+    amount = None
+    if estimated_amount.strip():
+        try:
+            amount = Decimal(estimated_amount.replace(",", "."))
+        except (InvalidOperation, ValueError):
+            raise HTTPException(status_code=400, detail="сумма: нужно число")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="сумма должна быть больше нуля")
+
+    session.add(
+        ResourceRequest(
+            customer_id=customer.id,
+            kind=kind,
+            name=name.strip(),
+            provider=provider.strip() or None,
+            account=account.strip() or None,
+            period_months=_positive_int(period_months, "срок"),
+            estimated_amount=amount,
+            reason=reason.strip() or None,
+        )
+    )
+    await session.commit()
+    return RedirectResponse("/resources", status_code=303)
 
 
 @app.get("/admin/resources", dependencies=[Depends(_feature_resources)])
@@ -885,12 +955,29 @@ async def admin_resources(
         )
     ).scalars().all()
     owners = {c.id: c for c in (await session.execute(select(Customer))).scalars().all()}
+    pending = (
+        await session.execute(
+            select(ResourceRequest)
+            .where(ResourceRequest.status == "requested")
+            .order_by(ResourceRequest.created_at)
+        )
+    ).scalars().all()
+    decided = (
+        await session.execute(
+            select(ResourceRequest)
+            .where(ResourceRequest.status != "requested")
+            .order_by(ResourceRequest.decided_at.desc())
+            .limit(15)
+        )
+    ).scalars().all()
     return templates.TemplateResponse(
         request,
         "admin_resources.html",
         {
             "customer": customer,
             "items": items,
+            "pending": pending,
+            "decided": decided,
             "people": people,
             "payments": payments,
             "owners": owners,
@@ -1008,6 +1095,100 @@ async def admin_resource_archive(
     if resource is None:
         raise HTTPException(status_code=404)
     resource.archived = not resource.archived
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
+
+
+@app.post("/admin/resource-requests/{request_id}/reject", dependencies=[Depends(_feature_resources)])
+async def admin_request_reject(
+    request_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    decision_note: str = Form(""),
+):
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    req = await session.get(ResourceRequest, request_id)
+    if req is None:
+        raise HTTPException(status_code=404)
+    if req.status != "requested":
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
+    req.status = "rejected"
+    req.decision_note = decision_note.strip() or None
+    req.decided_by_admin_id = customer.id
+    req.decided_at = utcnow()
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
+
+
+@app.post("/admin/resource-requests/{request_id}/fulfil", dependencies=[Depends(_feature_resources)])
+async def admin_request_fulfil(
+    request_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    amount: Decimal = Form(...),
+    currency: str = Form("RUB"),
+    period_end: str = Form(...),
+    url: str = Form(""),
+    decision_note: str = Form(""),
+):
+    """Оплатили картой у поставщика — фиксируем. Заявка превращается в ресурс
+    со сроком, платёж ложится в журнал, и дальше за сроком следит система.
+
+    Три записи делаются в одной транзакции: иначе оплата могла бы попасть в
+    журнал без ресурса, за которым следить, или заявка закрыться без следа
+    о деньгах.
+    """
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    req = await session.get(ResourceRequest, request_id)
+    if req is None:
+        raise HTTPException(status_code=404)
+    if req.status != "requested":
+        raise HTTPException(status_code=409, detail="по заявке уже принято решение")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="сумма должна быть больше нуля")
+    if currency not in ResourcePayment.CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"валюта {currency} не поддерживается")
+    end = _parse_date(period_end)
+    if end is None:
+        raise HTTPException(status_code=400, detail="укажите, до какого числа оплачено")
+
+    resource = Resource(
+        kind=req.kind,
+        name=req.name,
+        provider=req.provider,
+        owner_customer_id=req.customer_id,
+        account=req.account,
+        url=url.strip() or None,
+        expires_at=end,
+        note=req.reason,
+        created_by_admin_id=customer.id,
+    )
+    session.add(resource)
+    await session.flush()
+
+    session.add(
+        ResourcePayment(
+            resource_id=resource.id,
+            amount=amount,
+            currency=currency,
+            paid_at=utcnow(),
+            period_start=None,
+            period_end=end,
+            note=decision_note.strip() or None,
+            created_by_admin_id=customer.id,
+        )
+    )
+    req.status = "fulfilled"
+    req.decision_note = decision_note.strip() or None
+    req.decided_by_admin_id = customer.id
+    req.decided_at = utcnow()
+    req.resource_id = resource.id
     await session.commit()
     return RedirectResponse("/admin/resources", status_code=303)
 

@@ -30,6 +30,29 @@
   .res-when.unknown b{color:var(--text-faint);}
 
   .empty{font-size:15px;color:var(--text-faint);}
+  /* Пустой раздел не должен быть тупиком: человек пришёл сюда впервые и
+     должен понять, что здесь бывает и от кого это зависит. */
+  .empty-box{border:1px solid var(--border);border-radius:14px;padding:24px 26px;
+    background:var(--surface);max-width:62ch;}
+  .empty-box p{margin:0;font-size:14.5px;line-height:1.65;color:var(--text-dim);}
+  .empty-box p + p{margin-top:12px;}
+  .empty-box b{color:var(--text);}
+
+  /* ─── заявки ─── */
+  .blk{border-top:2px solid var(--text);padding-top:20px;margin-top:44px;}
+  .blk h2{font-size:17px;margin-bottom:6px;}
+  .blk-note{font-size:13.5px;line-height:1.6;color:var(--text-faint);margin:0 0 18px;max-width:64ch;}
+  .reqform{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;}
+  @media (max-width:820px){.reqform{grid-template-columns:1fr 1fr;}}
+  .reqform .wide{grid-column:1 / -1;}
+  .reqform label{font-size:12px;color:var(--text-faint);margin-bottom:4px;}
+  .reqlist{width:100%;border-collapse:collapse;margin-top:6px;}
+  .reqlist th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text-faint);font-weight:800;padding:0 14px 10px 0;}
+  .reqlist td{padding:12px 14px 12px 0;border-top:1px solid var(--border);font-size:14px;
+    vertical-align:baseline;}
+  .reqlist .sub{display:block;font-size:12.5px;color:var(--text-faint);margin-top:3px;}
+  .reqlist .when{color:var(--text-faint);font-size:12.5px;white-space:nowrap;}
 </style>
 {% endblock %}
 
@@ -46,7 +69,16 @@
   </div>
 
   {% if not items %}
-  <p class="empty">За вами пока ничего не закреплено.</p>
+  <div class="empty-box">
+    <p><b>За вами пока ничего не закреплено.</b></p>
+    <p>
+      Здесь появятся прокси, подписки и другие вещи со сроком, которые компания
+      купила и записала на вас: видно, до какого числа оплачено и сколько дней
+      осталось. Заводит и продлевает их администратор — если вам что-то нужно
+      или срок подходит к концу, напишите ему.
+    </p>
+    <p>За {{ warn_days }} дней до окончания срока администратору уходит напоминание.</p>
+  </div>
   {% else %}
   {% for item in items %}
   <div class="res {{ item.state.code }}">
@@ -81,6 +113,64 @@
     {%- elif warn_days % 10 in [2, 3, 4] and warn_days % 100 not in [12, 13, 14] %} дня
     {%- else %} дней{% endif %}.
   </p>
+  {% endif %}
+
+  <div class="blk">
+    <h2>Запросить подписку или прокси</h2>
+    <p class="blk-note">
+      Опишите, что нужно. Администратор оплатит картой у поставщика и зафиксирует —
+      после этого срок появится в списке выше, и об окончании предупредят заранее.
+      Если продлить надо уже существующий аккаунт, укажите его в поле «на какой аккаунт».
+    </p>
+    <form method="post" action="/resources/request" class="reqform">
+      <div>
+        <label>Что нужно</label>
+        <select name="kind">
+          {% for k in kinds %}<option value="{{ k }}"{% if k == 'subscription' %} selected{% endif %}>{{ kind_titles[k] }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Название</label>
+        <input name="name" required placeholder="например, ChatGPT Plus">
+      </div>
+      <div><label>Поставщик</label><input name="provider" placeholder="необязательно"></div>
+      <div><label>На какой аккаунт</label><input name="account" placeholder="логин или почта у поставщика"></div>
+      <div><label>Срок, месяцев</label><input name="period_months" type="number" min="1" placeholder="1"></div>
+      <div><label>Примерная сумма, ₽</label><input name="estimated_amount" type="number" step="0.01" min="0.01" placeholder="необязательно"></div>
+      <div class="wide"><label>Зачем нужно</label><input name="reason" placeholder="чтобы администратор решал по существу"></div>
+      <div class="wide"><button type="submit" style="height:44px;">Отправить заявку</button></div>
+    </form>
+  </div>
+
+  {% if requests %}
+  <div class="blk">
+    <h2>Мои заявки</h2>
+    <p class="blk-note">Отклонённые остаются с причиной — чтобы не подавать то же самое дважды.</p>
+    <table class="reqlist">
+      <thead><tr><th>Что</th><th>Статус</th><th>Подана</th></tr></thead>
+      <tbody>
+      {% for r in requests %}
+      <tr>
+        <td>
+          <strong>{{ r.name }}</strong>
+          <span class="sub">
+            {{ kind_titles.get(r.kind, r.kind) }}{% if r.provider %} · {{ r.provider }}{% endif %}
+            {%- if r.account %} · {{ r.account }}{% endif %}
+            {%- if r.period_months %} · {{ r.period_months }} мес.{% endif %}
+          </span>
+        </td>
+        <td>
+          {% if r.status == 'requested' %}<span class="badge badge-warn">на рассмотрении</span>
+          {% elif r.status == 'fulfilled' %}<span class="badge badge-ok">оплачена</span>
+          {% else %}<span class="badge badge-bad">отклонена</span>{% endif %}
+          {% if r.decision_note %}<span class="sub">{{ r.decision_note }}</span>{% endif %}
+        </td>
+        <td class="when">{{ r.created_at.strftime("%d.%m.%Y") }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 </div>
 {% endblock %}
