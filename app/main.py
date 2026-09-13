@@ -839,6 +839,10 @@ async def page_solutions(
 
 _CURRENCY_SIGNS = {"RUB": "₽", "USD": "$", "EUR": "€"}
 
+# Пагинации в проекте нет нигде; страница истории показывает последние
+# вызовы, а всё за период отдаёт выгрузка — она не ограничена.
+_USAGE_PAGE_LIMIT = 200
+
 _RESOURCE_KIND_TITLES = {
     "proxy": "Прокси",
     "subscription": "Подписка",
@@ -1491,6 +1495,129 @@ async def dashboard(
             "alias_of": {
                 (e.provider, e.model): llm.alias_for(e.provider, e.model) for e in events
             },
+        },
+    )
+
+
+async def _usage_history(
+    session: AsyncSession,
+    customer: Customer,
+    key: str,
+    month: str | None,
+    limit: int | None = None,
+) -> dict:
+    """Вызовы клиента за месяц, при желании — только по одному ключу.
+
+    Фильтр по ключу возможен потому, что api_key_id пишется в каждое событие.
+    Вызовы из веб-чата и Telegram приходят без ключа (api_key_id NULL) — для
+    них отдельное значение фильтра, иначе они молча пропадали бы из «всех»
+    при любом выборе.
+    """
+    start, end, label = _parse_month(month)
+    keys = (
+        await session.execute(
+            select(ApiKey)
+            .where(ApiKey.customer_id == customer.id)
+            .order_by(ApiKey.active.desc(), ApiKey.created_at.desc())
+        )
+    ).scalars().all()
+
+    stmt = select(UsageEvent).where(
+        UsageEvent.customer_id == customer.id,
+        UsageEvent.created_at >= start,
+        UsageEvent.created_at < end,
+    )
+    if key == "none":
+        stmt = stmt.where(UsageEvent.api_key_id.is_(None))
+    elif key:
+        try:
+            key_id = int(key)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ключ указан неверно")
+        # Чужой ключ фильтровать нельзя — иначе по номеру можно было бы
+        # подсмотреть, сколько вызовов у соседа.
+        if key_id not in {k.id for k in keys}:
+            raise HTTPException(status_code=404, detail="ключ не найден")
+        stmt = stmt.where(UsageEvent.api_key_id == key_id)
+
+    stmt = stmt.order_by(UsageEvent.created_at.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    events = (await session.execute(stmt)).scalars().all()
+
+    spent = sum((e.charged_rub or Decimal(0)) for e in events)
+    return {
+        "events": events,
+        "keys": keys,
+        "key": key,
+        "month": label,
+        "spent": spent,
+        "calls": len(events),
+        "alias_of": {(e.provider, e.model): llm.alias_for(e.provider, e.model) for e in events},
+    }
+
+
+@app.get("/usage")
+async def usage_page(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    key: str = "",
+    month: str | None = None,
+):
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    ctx = await _usage_history(session, customer, key, month, limit=_USAGE_PAGE_LIMIT)
+    ctx["customer"] = customer
+    ctx["limit"] = _USAGE_PAGE_LIMIT
+    return templates.TemplateResponse(request, "usage.html", ctx)
+
+
+@app.get("/usage.csv")
+async def usage_csv(
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    key: str = "",
+    month: str | None = None,
+):
+    """Выгрузка истории вызовов — то, что витрина обещает приложить к акту.
+
+    Без limit: выгрузка на то и выгрузка, чтобы отдать всё за период.
+    """
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    data = await _usage_history(session, customer, key, month)
+    by_id = {k.id: k for k in data["keys"]}
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(
+        ["Когда", "Модель", "Ключ", "Входящих токенов", "Исходящих", "Списано, ₽", "Статус"]
+    )
+    for e in data["events"]:
+        key_name = "—"
+        if e.api_key_id is not None:
+            k = by_id.get(e.api_key_id)
+            key_name = (k.name or f"ключ {k.id}") if k else f"ключ {e.api_key_id}"
+        writer.writerow(
+            [
+                e.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                llm.alias_for(e.provider, e.model) or e.model,
+                key_name,
+                e.input_tokens or 0,
+                e.output_tokens or 0,
+                f"{(e.charged_rub or Decimal(0)):.4f}".replace(".", ","),
+                e.status,
+            ]
+        )
+    # BOM и ; как разделитель — иначе русский Excel открывает файл одной
+    # колонкой и портит кириллицу (то же, что в админской выгрузке).
+    body = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="flawless-usage-{data["month"]}.csv"'
         },
     )
 

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}История вызовов — Flawless{% endblock %}
+
+{% block head %}
+<style>
+  .uh-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;
+    padding:34px 0 0;}
+  .uh-head h1{font-size:26px;letter-spacing:-0.015em;margin:0;}
+  .uh-note{font-size:13.5px;color:var(--text-faint);margin:8px 0 0;max-width:62ch;line-height:1.6;}
+  .uh-filters{display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin:22px 0 0;}
+  .uh-filters label{font-size:12px;color:var(--text-faint);display:block;margin-bottom:4px;}
+  .uh-filters select,.uh-filters input{height:38px;}
+  .uh-sum{display:flex;gap:34px;flex-wrap:wrap;border-top:2px solid var(--text);margin-top:26px;padding-top:16px;}
+  .uh-sum div span{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text-faint);font-weight:800;margin-bottom:4px;}
+  .uh-sum div b{font-size:20px;font-family:'JetBrains Mono',monospace;}
+  .uh-table{width:100%;border-collapse:collapse;margin-top:22px;}
+  .uh-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.07em;
+    color:var(--text-faint);font-weight:800;padding:0 14px 10px 0;}
+  .uh-table td{padding:11px 14px 11px 0;border-top:1px solid var(--border);font-size:14px;
+    vertical-align:baseline;}
+  .uh-table .n{text-align:right;font-family:'JetBrains Mono',monospace;white-space:nowrap;}
+  .uh-table .when{color:var(--text-faint);font-size:12.5px;white-space:nowrap;}
+  .uh-table .m{font-family:'JetBrains Mono',monospace;font-size:13px;}
+  .uh-empty{border-top:1px solid var(--border);margin-top:22px;padding:34px 0;color:var(--text-faint);
+    font-size:14.5px;line-height:1.7;max-width:60ch;}
+  .uh-cut{font-size:12.5px;color:var(--text-faint);margin-top:14px;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap">
+  <div class="uh-head">
+    <div>
+      <h1>История вызовов</h1>
+      <p class="uh-note">
+        Каждый вызов с моделью, токенами и списанной суммой. Отдельный ключ на проект —
+        и здесь видно, сколько этот проект стоил. Выгрузка открывается в русском Excel
+        и подходит как приложение к акту.
+      </p>
+    </div>
+    <a class="u-btn u-btn-primary u-btn-sm"
+       href="/usage.csv?month={{ month }}{% if key %}&key={{ key }}{% endif %}">Скачать CSV</a>
+  </div>
+
+  <form method="get" action="/usage" class="uh-filters">
+    <div>
+      <label>Ключ</label>
+      <select name="key" onchange="this.form.submit()">
+        <option value="">Все вызовы</option>
+        {% for k in keys %}
+        <option value="{{ k.id }}"{% if key == k.id|string %} selected{% endif %}>
+          {{ k.name or "Без названия" }} …{{ k.last_four }}{% if not k.active %} (отозван){% endif %}
+        </option>
+        {% endfor %}
+        <option value="none"{% if key == 'none' %} selected{% endif %}>Чат и Telegram (без ключа)</option>
+      </select>
+    </div>
+    <div>
+      <label>Месяц</label>
+      <input type="month" name="month" value="{{ month }}" onchange="this.form.submit()">
+    </div>
+    <noscript><button type="submit" class="secondary" style="height:38px;">Показать</button></noscript>
+  </form>
+
+  <div class="uh-sum">
+    <div><span>Вызовов</span><b>{{ calls|thousands }}</b></div>
+    <div><span>Списано</span><b class="u-money">{{ spent|money }}&nbsp;₽</b></div>
+    <div><span>Период</span><b>{{ month }}</b></div>
+  </div>
+
+  {% if not events %}
+  <div class="uh-empty">
+    За этот месяц вызовов не было.
+    {% if key %}Попробуйте выбрать другой ключ или снять фильтр.{% endif %}
+  </div>
+  {% else %}
+  <table class="uh-table">
+    <thead>
+      <tr>
+        <th>Когда</th><th>Модель</th><th>Ключ</th>
+        <th class="n">Токены</th><th class="n">Списано</th><th>Статус</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in events %}
+      <tr>
+        <td class="when">{{ e.created_at.strftime("%d.%m %H:%M") }}</td>
+        <td class="m" title="{{ e.provider }}/{{ e.model }}">{{ alias_of[(e.provider, e.model)] or e.model }}</td>
+        <td>
+          {%- if e.api_key_id is none -%}
+            <span style="color:var(--text-faint);">чат / Telegram</span>
+          {%- else -%}
+            {%- for k in keys if k.id == e.api_key_id -%}{{ k.name or "Без названия" }}{%- endfor -%}
+          {%- endif -%}
+        </td>
+        <td class="n">{{ e.input_tokens or "—" }} / {{ e.output_tokens or "—" }}</td>
+        <td class="n">{{ (e.charged_rub|money(4) ~ " ₽") if e.charged_rub is not none else "—" }}</td>
+        <td>
+          {% if e.status == 'success' %}<span class="badge badge-ok">ок</span>
+          {% elif e.status == 'failed' %}<span class="badge badge-bad">ошибка</span>
+          {% else %}<span class="badge badge-warn">идёт</span>{% endif %}
+          {% if e.billing_estimated %}<span class="badge badge-warn" title="Поставщик не прислал точные цифры — списано по оценке">оценка</span>{% endif %}
+          {% if e.dlp_redactions %}<span class="badge badge-role" title="Вырезано перед отправкой: {{ e.dlp_redactions }}">DLP</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if events|length >= limit %}
+  <p class="uh-cut">
+    Показаны последние {{ limit }} вызовов за месяц. Выгрузка CSV отдаёт все.
+  </p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

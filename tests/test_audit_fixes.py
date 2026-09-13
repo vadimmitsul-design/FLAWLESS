@@ -21,6 +21,12 @@ from app.config import settings
 from app.db import SessionLocal
 from app.models import Customer, TopupRequest, UsageEvent, WalletLedger, utcnow
 
+def _plain(html: str) -> str:
+    """Суммы выводятся по-русски: неразрывный пробел между тысячами и
+    сущность &nbsp; перед знаком рубля. Для проверок это шум."""
+    return html.replace("&nbsp;", " ").replace("\u00a0", " ")
+
+
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
 
@@ -769,3 +775,138 @@ def test_voice_is_not_transcribed_for_someone_who_cannot_pay(client):
                 await chatcore.ensure_can_spend(session, fresh)
 
     asyncio.run(_check())
+
+
+# ---------- история вызовов: то, что обещала витрина ----------
+
+
+def _make_event(customer_id, api_key_id, model, charged, when=None):
+    from app.models import UsageEvent as UE
+
+    async def _add():
+        async with SessionLocal() as session:
+            event = UE(
+                customer_id=customer_id,
+                billing_customer_id=customer_id,
+                api_key_id=api_key_id,
+                provider="openrouter",
+                model=model,
+                status="success",
+                input_tokens=100,
+                output_tokens=50,
+                charged_rub=Decimal(charged),
+            )
+            if when is not None:
+                event.created_at = when
+            session.add(event)
+            await session.commit()
+            return event.id
+
+    return asyncio.run(_add())
+
+
+def _key_ids(email):
+    from app.models import ApiKey
+
+    async def _get():
+        async with SessionLocal() as session:
+            person = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
+            return [
+                k.id
+                for k in (
+                    await session.execute(select(ApiKey).where(ApiKey.customer_id == person.id))
+                ).scalars().all()
+            ]
+
+    return asyncio.run(_get())
+
+
+def test_history_can_be_filtered_by_key(client):
+    """Витрина обещает агентствам отдельный ключ на клиента и историю по
+    каждому ключу: без фильтра обещание было пустым."""
+    _signup(client, "audit_hist@test.local")
+    person = _customer("audit_hist@test.local")
+    client.post("/api-key/regenerate", data={"name": "Проект А"})
+    client.post("/api-key/regenerate", data={"name": "Проект Б"})
+    first, second = _key_ids("audit_hist@test.local")[:2]
+
+    _make_event(person.id, first, "openai/gpt-5-mini", "10.0000")
+    _make_event(person.id, second, "openai/gpt-5-mini", "3.0000")
+    _make_event(person.id, None, "openai/gpt-5-mini", "1.0000")  # чат/телеграм
+
+    everything = client.get("/usage").text
+    assert "14,00" in _plain(everything), "итог по всем вызовам неверен"
+
+    only_first = client.get(f"/usage?key={first}").text
+    assert "10,00" in _plain(only_first)
+    assert "14,00" not in _plain(only_first), "фильтр по ключу не сработал"
+
+    no_key = client.get("/usage?key=none").text
+    assert "1,00" in _plain(no_key), "вызовы из чата и телеграма потерялись"
+
+
+def test_someone_elses_key_cannot_be_peeked_at(client):
+    """Иначе по номеру ключа можно было бы смотреть расход соседа."""
+    _signup(client, "audit_hist_a@test.local")
+    client.post("/api-key/regenerate", data={"name": "чужой"})
+    foreign = _key_ids("audit_hist_a@test.local")[0]
+
+    _signup(client, "audit_hist_b@test.local")
+    assert client.get(f"/usage?key={foreign}").status_code == 404
+
+
+def test_history_export_opens_in_russian_excel(client):
+    """BOM и точка с запятой — иначе Excel открывает файл одной колонкой и
+    портит кириллицу."""
+    _signup(client, "audit_csv@test.local")
+    person = _customer("audit_csv@test.local")
+    client.post("/api-key/regenerate", data={"name": "Проект А"})
+    key_id = _key_ids("audit_csv@test.local")[0]
+    _make_event(person.id, key_id, "openai/gpt-5-mini", "12.3456")
+
+    r = client.get("/usage.csv")
+    assert r.status_code == 200
+    assert "text/csv" in r.headers["content-type"]
+    assert "attachment" in r.headers["content-disposition"]
+
+    body = r.content.decode("utf-8")
+    assert body.startswith("\ufeff"), "нет BOM — Excel испортит кириллицу"
+    lines = body.lstrip("\ufeff").strip().splitlines()
+    assert lines[0].count(";") >= 6, "разделитель не ; — Excel склеит в одну колонку"
+    assert "Проект А" in lines[1], "имя ключа не попало в выгрузку"
+    assert "12,3456" in lines[1], "сумма не в русском формате"
+
+
+def test_export_is_not_cut_by_the_page_limit(client):
+    """Страница показывает последние N, выгрузка обязана отдать всё за
+    период — иначе к акту приложить нечего."""
+    from app import main
+
+    _signup(client, "audit_csvall@test.local")
+    person = _customer("audit_csvall@test.local")
+    limit = main._USAGE_PAGE_LIMIT
+    for i in range(3):
+        _make_event(person.id, None, "openai/gpt-5-mini", "1.0000")
+
+    async def _count_all():
+        async with SessionLocal() as session:
+            rows = (
+                await session.execute(
+                    select(UsageEvent).where(UsageEvent.customer_id == person.id)
+                )
+            ).scalars().all()
+            return len(rows)
+
+    total = asyncio.run(_count_all())
+    body = client.get("/usage.csv").content.decode("utf-8")
+    rows = len(body.strip().splitlines()) - 1  # без заголовка
+    assert rows == total
+    assert limit >= 1
+
+
+def test_history_needs_a_login(client):
+    client.post("/logout")
+    assert client.get("/usage", follow_redirects=False).status_code in (302, 303)
+    assert client.get("/usage.csv", follow_redirects=False).status_code in (302, 303)
