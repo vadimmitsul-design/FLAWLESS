@@ -319,3 +319,157 @@ def test_mock_response_is_refused_in_production(client, monkeypatch):
     assert "mock_response" in main._allowed_extra_params()
     monkeypatch.setattr(settings, "environment", "production")
     assert "mock_response" not in main._allowed_extra_params()
+
+
+# ---------- партия 2: защита, которая молча не работала ----------
+
+
+SECRET = "sk-liveAAAABBBBCCCCDDDD1234567890"
+
+
+def test_dlp_redacts_secrets_inside_content_parts(client, monkeypatch):
+    """Массив частей — стандартный формат OpenAI: его шлют все vision-клиенты
+    и собирает сам веб-чат при любой прикреплённой картинке. Пока DLP смотрел
+    только на строковый content, защита для этого формата была выключена
+    целиком и молча — в истории вызовов стояло «ничего не найдено»."""
+    from app import dlp
+
+    as_string, found_string = dlp.redact_messages(
+        [{"role": "user", "content": f"мой ключ {SECRET}"}]
+    )
+    as_parts, found_parts = dlp.redact_messages(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"мой ключ {SECRET}"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR"}},
+                ],
+            }
+        ]
+    )
+
+    assert SECRET not in str(as_string)
+    assert SECRET not in str(as_parts), "секрет ушёл провайдеру в открытом виде"
+    assert found_parts == found_string, "утечка не отмечена в истории вызовов"
+    # картинка проходит нетронутой
+    assert as_parts[0]["content"][1]["image_url"] == {"url": "data:image/png;base64,iVBOR"}
+
+
+def test_message_text_reads_both_shapes():
+    from app import dlp
+
+    assert dlp.message_text({"content": "просто строка"}) == "просто строка"
+    assert dlp.message_text(
+        {"content": [{"type": "text", "text": "часть"}, {"type": "image_url"}]}
+    ) == "часть"
+    assert dlp.message_text({}) == ""
+
+
+def test_child_block_list_survives_an_attached_image(client):
+    """Блок-лист брал ПОСЛЕДНЕЕ строковое сообщение, а сообщение с картинкой
+    уходит массивом частей — ребёнку достаточно было приложить любую
+    картинку, чтобы запрет перестал срабатывать, а платил родитель."""
+    from app.main import ChildRequestBlocked, _prepare_messages
+
+    class _Child:
+        is_child = True
+
+    blocked = [{"role": "user", "content": "напиши сочинение про войну и мир"}]
+    with pytest.raises(ChildRequestBlocked):
+        _prepare_messages(_Child(), blocked, None)
+
+    with_image = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "напиши сочинение про войну и мир"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR"}},
+            ],
+        }
+    ]
+    with pytest.raises(ChildRequestBlocked):
+        _prepare_messages(_Child(), with_image, None)
+
+
+def test_healthz_is_degraded_when_no_model_can_be_called(client, monkeypatch):
+    """База жива, а вызвать нечего: внешний монитор рапортовал «жив», пока
+    сервис не мог обслужить ни одного запроса."""
+
+    async def _nothing(session, now):
+        return set()
+
+    monkeypatch.setattr(llm, "priced_aliases", _nothing)
+    r = client.get("/healthz")
+    assert r.status_code == 503
+    assert r.json()["models_ready"] == 0
+
+
+def test_empty_model_answer_is_a_failed_call_not_a_paid_one(client, monkeypatch):
+    """content: null — штатный отказ модели, choices: [] — сбой поставщика.
+    Разбор по индексам ронял обработчик ПОСЛЕ списания: деньги ушли, ответ
+    потерян, клиент получил 500."""
+
+    async def _empty(alias, messages, allowed_aliases=None, **kwargs):
+        return alias, "openrouter", "openai/gpt-5-mini", {
+            "id": "chatcmpl-empty",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": None}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+        }
+
+    monkeypatch.setattr(llm, "chat_completion_with_fallback", _empty)
+
+    _signup(client, "audit_empty@test.local")
+    admin = _admin_client()
+    _topup(client, admin, "50")
+    customer = _customer("audit_empty@test.local")
+    before = customer.balance_rub
+
+    r = client.post("/chat/send", data={"model": "gpt-5-mini", "message": "привет"})
+    assert r.status_code == 502, f"ожидали понятную ошибку, получили {r.status_code}"
+
+    event = _last_event(customer.id)
+    assert event.status == "failed", "пустой ответ закрыт как успешный"
+    assert event.charged_rub is None, "за пустой ответ списаны деньги"
+    assert _customer("audit_empty@test.local").balance_rub == before
+
+
+def test_no_choices_at_all_does_not_leave_the_reserve_hanging(client, monkeypatch):
+    """Падение ДО финализации оставляло событие в pending, и его резерв
+    вычитался из доступного баланса до прихода уборщика."""
+
+    async def _no_choices(alias, messages, allowed_aliases=None, **kwargs):
+        return alias, "openrouter", "openai/gpt-5-mini", {"id": "x", "choices": []}
+
+    monkeypatch.setattr(llm, "chat_completion_with_fallback", _no_choices)
+
+    _signup(client, "audit_nochoices@test.local")
+    admin = _admin_client()
+    _topup(client, admin, "50")
+    customer = _customer("audit_nochoices@test.local")
+
+    assert client.post("/chat/send", data={"model": "gpt-5-mini", "message": "привет"}).status_code == 502
+
+    async def _pending():
+        async with SessionLocal() as session:
+            return (
+                await session.execute(
+                    select(UsageEvent).where(
+                        UsageEvent.billing_customer_id == customer.id,
+                        UsageEvent.status == "pending",
+                    )
+                )
+            ).scalars().all()
+
+    assert asyncio.run(_pending()) == [], "резерв повис в pending"
+
+
+def test_showroom_links_disappear_with_the_showroom(client, monkeypatch):
+    """Моя же вчерашняя регрессия: общая шапка принесла в документацию пять
+    ссылок, которые во внутреннем контуре закрыты флагом и отдают 404."""
+    monkeypatch.setattr(settings, "enable_public_site", False)
+    html = client.get("/docs").text
+    for gone in ("/models", "/pricing", "/product/api", "/product/chat", "/solutions/developers"):
+        assert f'href="{gone}"' not in html, f"ссылка {gone} ведёт в 404 во внутреннем контуре"
+    assert 'href="/docs"' in html, "документация нужна и своим разработчикам"
+    assert 'href="/signup"' not in html, "регистрации во внутреннем контуре нет"

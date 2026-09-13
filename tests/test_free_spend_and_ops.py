@@ -265,7 +265,12 @@ def test_reserve_uses_the_same_capped_number_as_the_request():
 def test_healthz_actually_touches_the_database(client):
     r = client.get("/healthz")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "database": "ok"}
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["database"] == "ok"
+    # Готовность моделей теперь тоже часть ответа: живая база при нулевом
+    # каталоге означает сервис, который не может обслужить ни одного вызова.
+    assert body["models_ready"] >= 1
 
 
 def test_alerts_fire_on_calls_without_cost(client):

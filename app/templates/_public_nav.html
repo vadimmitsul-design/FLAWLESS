@@ -7,11 +7,18 @@
        документации. Раньше у документации была своя шапка с тремя пунктами
        из шести — человек заходил в справочник и терял половину сайта. #}
     <nav class="u-nav">
+      {# Страницы витрины закрыты флагом ENABLE_PUBLIC_SITE и во внутреннем
+         контуре отдают 404. Ссылки на них должны исчезать вместе с ними —
+         иначе сотрудник открывает документацию, жмёт «Модели» и упирается
+         в пустую страницу. Документация под флаг не попадает: справочник по
+         API нужен и своим разработчикам. #}
+      {% if features.enable_public_site %}
       <a href="/models" class="{% if here == 'models' %}is-here{% endif %}">Модели</a>
       <a href="/pricing" class="{% if here == 'pricing' %}is-here{% endif %}">Цены</a>
       <a href="/product/api" class="{% if here == 'api' %}is-here{% endif %}">API</a>
       <a href="/product/chat" class="{% if here == 'chat' %}is-here{% endif %}">Чат</a>
       <a href="/solutions/developers" class="{% if here == 'solutions' %}is-here{% endif %}">Решения</a>
+      {% endif %}
       <a href="/docs" class="{% if here == 'docs' %}is-here{% endif %}">Документация</a>
     </nav>
     <div class="row">
@@ -24,9 +31,12 @@
               title="Светлая/тёмная тема" aria-label="Переключить тему">🌓</button>
       {% if signed_in %}
       <a href="/" class="u-btn u-btn-primary u-btn-sm">В кабинет</a>
-      {% else %}
+      {% elif features.enable_public_site %}
       <a href="/login" class="u-btn u-btn-ghost u-btn-sm">Войти</a>
       <a href="/signup" class="u-btn u-btn-primary u-btn-sm">Начать</a>
+      {% else %}
+      {# Внутренний контур: регистрации нет, есть вход по приглашению. #}
+      <a href="/login" class="u-btn u-btn-primary u-btn-sm">Войти</a>
       {% endif %}
     </div>
   </div>

@@ -10,6 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import billing, dlp, llm, pricing, ratelimit
 
 
+class EmptyProviderResponse(Exception):
+    """Модель ответила, но текста в ответе нет.
+
+    `content: null` — штатный отказ модели (safety-блок), `choices: []` —
+    сбой у поставщика. Разбор по индексам ронял обработчик ПОСЛЕ списания:
+    деньги ушли, а клиенту уходило буквально слово «None». Считаем это
+    неудавшимся вызовом: событие закрывается ошибкой, резерв снимается,
+    денег не берём.
+    """
+
+
 class TooManyRequests(Exception):
     """Слишком частые обращения от одного человека."""
 
@@ -70,6 +81,16 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
     event.provider = provider
     event.model = model
     latency_ms = int((time.monotonic() - started) * 1000)
+    choices = (llm.to_dict(response) or {}).get("choices") or []
+    message = (choices[0] or {}).get("message") or {} if choices else {}
+    reply = message.get("content")
+    if not (isinstance(reply, str) and reply.strip()):
+        # Проверяем ДО списания: платить за ответ, которого нет, незачем.
+        await billing.finalize_failure(
+            session, event, error_code="EmptyProviderResponse", latency_ms=latency_ms
+        )
+        raise EmptyProviderResponse()
+
     usage = llm.extract_chat_usage(response)
     price = await pricing.find_price(session, provider, model, None, None, event.created_at)
     cost_usd = pricing.compute_cost(price, usage)
@@ -84,4 +105,4 @@ async def run_chat_turn(session: AsyncSession, customer_id: int, model_alias: st
         latency_ms=latency_ms,
         provider_request_id=llm.extract_call_id(response),
     )
-    return llm.to_dict(response)["choices"][0]["message"]["content"]
+    return reply

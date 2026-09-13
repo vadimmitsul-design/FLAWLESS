@@ -250,7 +250,21 @@ async def healthz(session: AsyncSession = Depends(get_session)):
     except Exception as e:
         logger.error("healthz: database unreachable: %r", e)
         return JSONResponse({"status": "degraded", "database": "unreachable"}, status_code=503)
-    return {"status": "ok", "database": "ok"}
+    # База жива — этого мало. Сервис существует ради вызова моделей, а вызвать
+    # можно только модель с действующей ценой: без неё каждый запрос клиента
+    # получает 503. Раньше внешний монитор рапортовал «жив», пока сервис не
+    # мог обслужить ни одного вызова.
+    try:
+        models_ready = len(await llm.priced_aliases(session, utcnow()))
+    except Exception as e:  # реестр не поднят, конфиг сломан
+        logger.error("healthz: model registry unusable: %r", e)
+        return JSONResponse({"status": "degraded", "models": "unusable"}, status_code=503)
+    if models_ready == 0:
+        logger.error("healthz: ни одной модели с действующей ценой — вызовы невозможны")
+        return JSONResponse(
+            {"status": "degraded", "database": "ok", "models_ready": 0}, status_code=503
+        )
+    return {"status": "ok", "database": "ok", "models_ready": models_ready}
 
 
 # ---------- веб: регистрация / логин ----------
@@ -2703,8 +2717,13 @@ def _prepare_messages(customer: Customer, messages: list[dict], prompt: Prompt |
     prepared = list(messages)
 
     if customer.is_child:
+        # dlp.message_text, а не isinstance(str): сообщение с картинкой уходит
+        # массивом частей, и проверка брала ПРЕДЫДУЩЕЕ строковое сообщение или
+        # пустую строку. Ребёнку достаточно было приложить любую картинку,
+        # чтобы запрет «напиши сочинение» перестал срабатывать, а платил
+        # при этом родитель.
         last_user_text = next(
-            (m.get("content") for m in reversed(prepared) if m.get("role") == "user" and isinstance(m.get("content"), str)),
+            (dlp.message_text(m) for m in reversed(prepared) if m.get("role") == "user"),
             "",
         )
         if _CHILD_BLOCKED_PATTERN.search(last_user_text or ""):
@@ -3283,6 +3302,25 @@ async def _stream_chat_completion(
             await _charge_partial_and_close("ClientDisconnected")
 
 
+def _reply_text_or_none(response) -> str | None:
+    """Текст ответа модели — защитно, а не по индексам.
+
+    `choices[0].message.content` может отсутствовать штатно: `content: null`
+    приходит при отказе модели (safety-блок у OpenAI и Gemini через
+    OpenRouter), а `choices: []` — при сбое на стороне поставщика. Разбор по
+    индексам ронял обработчик ПОСЛЕ списания: деньги ушли, ответ потерян,
+    в колонку NOT NULL летел None, клиент получал 500. Если падение
+    случалось до финализации, резерв висел pending до прихода уборщика и
+    вычитался из доступного баланса.
+    """
+    choices = (llm.to_dict(response) or {}).get("choices") or []
+    if not choices:
+        return None
+    message = (choices[0] or {}).get("message") or {}
+    text = message.get("content")
+    return text if isinstance(text, str) and text.strip() else None
+
+
 # ---------- веб: чат в кабинете (2.3 доработок) ----------
 # Третья дверь входа рядом с API-ключом и Telegram — для клиентов, которые
 # никогда не видели API-ключа. Тот же путь биллинга, что и /v1/chat/completions
@@ -3548,7 +3586,21 @@ async def web_chat_send(
     usage = llm.extract_chat_usage(response)
     price = await pricing.find_price(session, resp_provider, resp_model, None, None, event.created_at)
     cost_usd = pricing.compute_cost(price, usage)
-    reply_text = llm.to_dict(response)["choices"][0]["message"]["content"]
+    reply_text = _reply_text_or_none(response)
+    if reply_text is None:
+        # Пустой ответ — это неудавшийся вызов, а не успех с пустым текстом.
+        # Закрываем событие как ошибку (резерв снимается), денег не берём.
+        await billing.finalize_failure(
+            session, event, error_code="EmptyProviderResponse", latency_ms=latency_ms
+        )
+        logger.warning(
+            "web chat event %s: модель вернула пустой ответ (%s/%s)",
+            event.id, resp_provider, resp_model,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="модель вернула пустой ответ — попробуйте переформулировать запрос",
+        )
     await billing.finalize_success(
         session,
         event,

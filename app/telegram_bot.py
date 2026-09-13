@@ -136,6 +136,13 @@ async def _handle_update(update: dict) -> None:
                 f"потрачено {e.spent} ₽ из {e.limit} ₽. Лимит меняет администратор.",
             )
             return
+        except chatcore.EmptyProviderResponse:
+            await send_message(
+                chat_id,
+                f"{prefix}Модель не дала ответа на этот запрос — деньги не списаны, "
+                f"попробуйте переформулировать.",
+            )
+            return
         except chatcore.TooManyRequests:
             await send_message(chat_id, f"{prefix}Слишком часто — подождите немного и повторите.")
             return
