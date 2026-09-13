@@ -14,6 +14,10 @@
   } catch (e) {}
 })();
 </script>
+<!-- Знак инлайном, а не файлом: статики у приложения нет, а без явного
+     rel="icon" браузер всё равно просит /favicon.ico и получает 404. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233E8CB8'/%3E%3Cpath d='M20 16H46V25H29V30H42V39H29V48H20Z' fill='%23ffffff' transform='translate(4 0) skewX(-10)'/%3E%3C/svg%3E">
+<meta name="theme-color" content="#3E8CB8">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Onest:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Nunito:ital,wght@1,800;1,900&display=swap">
 <style>
   /* Фирменные цвета сняты с логотипа: #3E8CB8 — мягкий стальной синий с
