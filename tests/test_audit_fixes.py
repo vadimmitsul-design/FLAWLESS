@@ -10,6 +10,8 @@ email с другим файлом роняет регистрацию 409-м (�
 """
 
 import asyncio
+import math
+import pathlib
 import re
 from decimal import Decimal
 
@@ -1004,3 +1006,134 @@ def test_password_reset_queue_cannot_be_flooded(client):
         statuses.append(r.status_code)
     assert 429 in statuses, "очередь заявок наливается без ограничений"
     ratelimit._login_hits.clear()
+
+
+# ---------- партия 7: читаемость и пустые состояния ----------
+
+
+def _oklch_to_srgb(L, C, H):
+    h = math.radians(H)
+    a, b = C * math.cos(h), C * math.sin(h)
+    l_ = L + 0.3963377774 * a + 0.2158037573 * b
+    m_ = L - 0.1055613458 * a - 0.0638541728 * b
+    s_ = L - 0.0894841775 * a - 1.2914855480 * b
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
+    g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
+    bl = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+
+    def enc(x):
+        x = max(0.0, min(1.0, x))
+        return 1.055 * (x ** (1 / 2.4)) - 0.055 if x > 0.0031308 else 12.92 * x
+
+    return enc(r), enc(g), enc(bl)
+
+
+def _luminance(token):
+    def lin(c):
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = _oklch_to_srgb(*token)
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def _contrast(fg, bg):
+    a, b = _luminance(fg), _luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _tokens(block: str) -> dict:
+    """Значения oklch-токенов из одного блока base.html."""
+    found = {}
+    for name, L, C, H in re.findall(
+        r"(--[a-z0-9-]+):\s*oklch\(([\d.]+)%\s+([\d.]+)\s+([\d.]+)", block
+    ):
+        found[name] = (float(L) / 100, float(C), float(H))
+    return found
+
+
+def _theme_block(css: str, selector: str) -> str:
+    start = css.index(selector)
+    return css[start : css.index("}", start)]
+
+
+BASE_CSS = (pathlib.Path("app/templates/base.html")).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "selector,bg_token",
+    [
+        ("  :root{", "--bg"),
+        ('  :root[data-theme="dark"]{', "--bg"),
+        ("  .surface-dark{", "--bg"),
+        ("  :root{", "--surface"),
+        ('  :root[data-theme="dark"]{', "--surface"),
+        ("  .surface-dark{", "--surface"),
+    ],
+)
+def test_faint_text_is_readable_in_every_theme(selector, bg_token):
+    """--text-faint красит ВСЕ заголовки таблиц, подписи и пояснения в
+    продукте. Он был ниже нормы 4.5:1 в обеих темах сразу (3,15–4,14).
+    Контраст считается, а не оценивается на глаз — в этом проекте цвет уже
+    один раз подбирали глазом и промахнулись мимо логотипа."""
+    tokens = _tokens(_theme_block(BASE_CSS, selector))
+    ratio = _contrast(tokens["--text-faint"], tokens[bg_token])
+    assert ratio >= 4.5, f"{selector} {bg_token}: контраст {ratio:.2f} ниже нормы"
+
+
+def test_money_colour_is_readable_on_white():
+    """--accent-2 красит суммы в админке — на белом он давал 3,04:1."""
+    tokens = _tokens(_theme_block(BASE_CSS, "  :root{"))
+    ratio = _contrast(tokens["--accent-2"], tokens["--surface"])
+    assert ratio >= 4.5, f"суммы на белом: {ratio:.2f}"
+
+
+def test_colour_scheme_is_declared_for_native_controls():
+    """Без color-scheme браузер считает страницу светлой и рисует свои части
+    поверх тёмной вёрстки: белая полоса прокрутки и невидимая иконка
+    календаря у полей «Оплачено до» в журнале ресурсов."""
+    assert "color-scheme:light" in BASE_CSS
+    assert BASE_CSS.count("color-scheme:dark") >= 2, "тёмная тема и витрина обе должны объявить"
+
+
+def test_landing_bubble_does_not_use_hardcoded_white():
+    """На витрине --accent светлый, и белый текст на нём давал 2,27:1."""
+    landing = pathlib.Path("app/templates/landing.html").read_text(encoding="utf-8")
+    bubble = next(line for line in landing.splitlines() if ".msg-user{" in line)
+    assert "#fff" not in bubble, "цвет захардкожен вместо токена"
+    assert "--btn-on-accent" in bubble
+
+
+def test_cabinet_does_not_deny_calls_that_happened(client):
+    """Итог считается за 14 дней, а таблица вызовов показывает последние 20
+    без ограничения по времени: у поработавшего месяц назад первый экран
+    утверждал «Вызовов ещё не было» и тут же показывал вызов со списанием."""
+    from datetime import timedelta
+
+    _signup(client, "audit_old@test.local")
+    person = _customer("audit_old@test.local")
+    _make_event(
+        person.id, None, "openai/gpt-5-mini", "7.7777", when=utcnow() - timedelta(days=30)
+    )
+
+    html = client.get("/").text
+    assert "Вызовов ещё не было" not in html, "страница отрицает вызов, который сама показывает"
+    assert "вызовов не было" in html, "нет честной формулировки про период"
+
+
+def test_empty_chart_state_is_reachable(client):
+    """Ветка «пока нечего показывать» была вложена в условие, дублирующее
+    её собственное, и не отрисовывалась ни при каком состоянии данных —
+    вместо объяснения пользователь видел дыру."""
+    from datetime import timedelta
+
+    _signup(client, "audit_chart@test.local")
+    person = _customer("audit_chart@test.local")
+    _make_event(
+        person.id, None, "openai/gpt-5-mini", "1.0000", when=utcnow() - timedelta(days=40)
+    )
+
+    html = client.get("/").text
+    body = html[html.index("</style>") :]
+    assert "chart-empty" in body, "пустое состояние графика по-прежнему недостижимо"

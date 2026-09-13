@@ -1424,6 +1424,12 @@ async def _spend_summary(session: AsyncSession, customer: Customer, days: int = 
     """Сколько человек потратил: итоги, разбивка по дням и место относительно
     его потолков.
 
+    Возвращает ещё и ever_called — были ли вызовы КОГДА-ЛИБО. Итог считается
+    за последние 14 дней, а таблица вызовов в кабинете показывает последние
+    20 без ограничения по времени: у человека, поработавшего месяц назад,
+    первый экран утверждал «Вызовов ещё не было» и тут же показывал вызов со
+    списанной суммой.
+
     Считается по customer_id (кто вызывал), а не по billing_customer_id (с
     чьего кошелька списано): в кабинете человек хочет видеть СВОЙ расход.
     У детского аккаунта платит родитель, но вызовы всё равно его.
@@ -1506,6 +1512,15 @@ async def _spend_summary(session: AsyncSession, customer: Customer, days: int = 
             int(balance / per_day) if per_day > 0 and balance > 0 and balance / per_day <= 180 else None
         ),
         "runway_long": bool(per_day > 0 and balance > 0 and balance / per_day > 180),
+        "ever_called": bool(
+            (
+                await session.execute(
+                    select(func.count(UsageEvent.id)).where(
+                        UsageEvent.customer_id == customer.id
+                    )
+                )
+            ).scalar_one()
+        ),
     }
 
 

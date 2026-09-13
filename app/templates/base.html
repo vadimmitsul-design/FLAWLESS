@@ -34,6 +34,7 @@
                   ниже 4.5:1 к белому, а сам фирменный слишком светлый (3.3:1).
      Светлая тема основная: публичный сайт и документация открываются светлыми. */
   :root{
+    color-scheme:light;
     --bg:oklch(97.6% 0.004 250);
     --bg-2:oklch(94.4% 0.007 245);
     --surface:oklch(100% 0 0);
@@ -41,11 +42,11 @@
     --border:oklch(88% 0.012 245);
     --text:oklch(17% 0.020 245);
     --text-dim:oklch(43% 0.016 245);
-    --text-faint:oklch(61% 0.012 245);
+    --text-faint:oklch(55% 0.012 245);  /* 4.52:1 к фону, 4.84:1 к белому */
     --brand:oklch(61% 0.101 237);
     --accent:oklch(54% 0.111 237);
     --accent-hi:oklch(46% 0.115 237);
-    --accent-2:oklch(66% 0.080 222);
+    --accent-2:oklch(56% 0.080 222);  /* 4.54:1 к белому: им покрашены суммы */
     --accent-wash:oklch(61% 0.101 237 / 0.10);
     --warn:oklch(55% 0.16 85);
     --bad:oklch(52% 0.20 25);
@@ -66,6 +67,7 @@
     --band-line:oklch(31% 0.038 249);
   }
   :root[data-theme="dark"]{
+    color-scheme:dark;
     --bg:oklch(17% 0.016 245);
     --bg-2:oklch(20% 0.018 245);
     --surface:oklch(23% 0.018 245);
@@ -73,7 +75,7 @@
     --border:oklch(33% 0.018 245);
     --text:oklch(96% 0.006 245);
     --text-dim:oklch(74% 0.016 245);
-    --text-faint:oklch(56% 0.014 245);
+    --text-faint:oklch(62% 0.014 245);  /* 5.26:1 к фону, 4.64:1 к карточке */
     --brand:oklch(72% 0.100 237);
     --accent:oklch(72% 0.100 237);
     --accent-hi:oklch(80% 0.080 237);
@@ -137,7 +139,7 @@
   input[type="number"]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
   select{
     appearance:none;-webkit-appearance:none;-moz-appearance:none;
-    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='currentColor' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
     background-repeat:no-repeat;background-position:right 14px center;padding-right:34px;
     cursor:pointer;
   }
@@ -164,6 +166,7 @@
      документация продолжают слушаться выбора пользователя. Все компоненты
      ходят через var(), поэтому переопределения хватает. */
   .surface-dark{
+    color-scheme:dark;
     --bg:oklch(13% 0.020 250);
     --bg-2:oklch(16% 0.024 250);
     --surface:oklch(18.5% 0.026 250);
@@ -171,7 +174,7 @@
     --border:oklch(27% 0.028 250);
     --text:oklch(95% 0.010 245);
     --text-dim:oklch(74% 0.020 245);
-    --text-faint:oklch(56% 0.020 245);
+    --text-faint:oklch(60% 0.020 245);  /* 5.11:1 к фону витрины */
     --brand:oklch(74% 0.105 237);
     --accent:oklch(74% 0.105 237);
     --accent-hi:oklch(83% 0.085 237);

@@ -143,8 +143,10 @@
       <div class="bal-note">
         При нынешнем темпе баланса хватит надолго — больше чем на полгода.
       </div>
-      {% elif not spend.total %}
+      {% elif not spend.ever_called %}
       <div class="bal-note">Вызовов ещё не было. Расход появится здесь после первого запроса.</div>
+      {% elif not spend.total %}
+      <div class="bal-note">За последние {{ spend.days }} дней вызовов не было — история ниже.</div>
       {% endif %}
       <div class="bal-actions">
         <a href="#topup" class="u-btn u-btn-primary u-btn-sm">Пополнить</a>
@@ -174,7 +176,11 @@
     {% endif %}
   </div>
 
-  {% if spend.total %}
+  {# Внешнего условия здесь быть не должно: оно дублировало внутреннее, и
+     ветка «пока нечего показывать» была недостижима — вместо объяснения
+     пользователь видел просто дыру на первом экране. Карточку прячем только
+     когда вызовов не было НИКОГДА: там свой блок «с чего начать». #}
+  {% if spend.ever_called %}
   <div class="chart-box">
     <div class="chart-head">
       <h2>Расход по дням</h2>
