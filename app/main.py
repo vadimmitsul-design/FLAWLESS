@@ -43,6 +43,7 @@ from app.models import (  # noqa: F401  as_utc используется в ра�
     ResourcePayment,
     ResourceRequest,
     as_utc,
+    days_left,
     SubscriptionOrder,
     TelegramLink,
     TelegramLinkCode,
@@ -836,6 +837,8 @@ async def page_solutions(
 
 # ---------- ресурсы со сроком (прокси, подписки) ----------
 
+_CURRENCY_SIGNS = {"RUB": "₽", "USD": "$", "EUR": "€"}
+
 _RESOURCE_KIND_TITLES = {
     "proxy": "Прокси",
     "subscription": "Подписка",
@@ -862,7 +865,7 @@ def _resource_state(resource: Resource, now: datetime, warn_days: int) -> dict:
     expires = as_utc(resource.expires_at)
     if expires is None:
         return {"code": "unknown", "title": "Срок не указан", "days": None}
-    left = (expires - now).days
+    left = days_left(expires, now)
     if left < 0:
         return {"code": "expired", "title": "Просрочен", "days": left}
     if left <= warn_days:
@@ -883,22 +886,31 @@ async def _resources_with_state(
 
     now = utcnow()
     warn = settings.resource_expiry_warn_days
-    paid = dict(
-        (resource_id, total)
-        for resource_id, total in (
-            await session.execute(
-                select(ResourcePayment.resource_id, func.coalesce(func.sum(ResourcePayment.amount), 0))
-                .where(ResourcePayment.currency == "RUB")
-                .group_by(ResourcePayment.resource_id)
-            )
-        ).all()
-    )
+    # По каждой валюте отдельно. Раньше сумма считалась только по рублёвым
+    # строкам, и подписка, оплаченная картой за $20 у зарубежного поставщика
+    # (основной сценарий этого раздела), показывала «0,00 ₽» — без единого
+    # признака, что часть платежей отброшена. Курс в платеже не хранится,
+    # привести к рублям задним числом нечем, поэтому показываем как есть.
+    paid: dict[int, dict[str, object]] = {}
+    for resource_id, currency, total in (
+        await session.execute(
+            select(
+                ResourcePayment.resource_id,
+                ResourcePayment.currency,
+                func.coalesce(func.sum(ResourcePayment.amount), 0),
+            ).group_by(ResourcePayment.resource_id, ResourcePayment.currency)
+        )
+    ).all():
+        paid.setdefault(resource_id, {})[currency] = total
     return [
         {
             "r": r,
             "state": _resource_state(r, now, warn),
             "kind_title": _RESOURCE_KIND_TITLES.get(r.kind, r.kind),
-            "paid_total_rub": paid.get(r.id, 0),
+            "paid_totals": [
+                {"sign": _CURRENCY_SIGNS.get(cur, cur), "amount": total}
+                for cur, total in sorted(paid.get(r.id, {}).items())
+            ],
         }
         for r in rows
     ]
@@ -1082,6 +1094,51 @@ async def admin_resource_create(
             created_by_admin_id=customer.id,
         )
     )
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
+
+
+@app.post("/admin/resources/{resource_id}/edit", dependencies=[Depends(_feature_resources)])
+async def admin_resource_edit(
+    resource_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    name: str = Form(...),
+    owner_customer_id: int = Form(...),
+    account: str = Form(""),
+    url: str = Form(""),
+    expires_at: str = Form(""),
+    note: str = Form(""),
+):
+    """Правка карточки ресурса.
+
+    Оплата двигает срок только вперёд — это защита от опечатки в дате,
+    которая иначе делала бы рабочий прокси просроченным. Но пока правки не
+    было вовсе, та же защита делала опечатку НЕУСТРАНИМОЙ: «оплачено до
+    2036» навсегда выпадало из предупреждений, а ошибка в выборе владельца
+    отдавала чужую подписку не тому человеку. Здесь срок ставится как
+    указано, в том числе назад — это осознанное исправление, а не побочный
+    эффект платежа.
+    """
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    resource = await session.get(Resource, resource_id)
+    if resource is None:
+        raise HTTPException(status_code=404)
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="название не может быть пустым")
+    owner = await session.get(Customer, owner_customer_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="сотрудник не найден")
+
+    resource.name = name.strip()
+    resource.owner_customer_id = owner_customer_id
+    resource.account = account.strip() or None
+    resource.url = url.strip() or None
+    resource.expires_at = _parse_date(expires_at)
+    resource.note = note.strip() or None
     await session.commit()
     return RedirectResponse("/admin/resources", status_code=303)
 

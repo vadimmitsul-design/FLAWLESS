@@ -18,7 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models import Customer, Resource, TelegramLink, UsageEvent, as_utc, utcnow
+from app.models import Customer, Resource, TelegramLink, UsageEvent, as_utc, days_left, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +111,9 @@ async def _collect_problems(session: AsyncSession) -> list[tuple[str, str]]:
         now = utcnow()
         for resource, owner_name in rows:
             expires = as_utc(resource.expires_at)
-            left = (expires - now).days
+            # Та же функция, что и на страницах: иначе телеграм и кабинет
+            # расходятся в оценке одного и того же срока на сутки.
+            left = days_left(expires, now)
             who = f" ({owner_name})" if owner_name else ""
             if left < 0:
                 text = (
@@ -120,9 +122,10 @@ async def _collect_problems(session: AsyncSession) -> list[tuple[str, str]]:
                     f"{expires.strftime('%d.%m.%Y')}"
                 )
             else:
+                when = "сегодня" if left == 0 else f"через {left} дн."
                 text = (
-                    f"⏳ Flawless: «{resource.name}»{who} истекает через {left} дн. — "
-                    f"оплачено до {resource.expires_at.strftime('%d.%m.%Y')}"
+                    f"⏳ Flawless: «{resource.name}»{who} истекает {when} — "
+                    f"оплачено до {expires.strftime('%d.%m.%Y')}"
                 )
             # Ключ с датой окончания: продлили — ключ сменился, и о новом
             # сроке предупредят заново, а не промолчат из-за антиспама.

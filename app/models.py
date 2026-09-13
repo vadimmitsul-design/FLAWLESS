@@ -30,6 +30,23 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def days_left(expires: datetime | None, now: datetime) -> int | None:
+    """Сколько КАЛЕНДАРНЫХ дней осталось. «Оплачено до 13.09» значит, что
+    13 сентября ещё оплачено: в этот день остаётся 0, а не -1.
+
+    Вычитание моментов давало ровно суточную ошибку в обе стороны — дата из
+    формы кладётся UTC-полночью, а (expires - now).days для отрицательной
+    разницы округляется ВНИЗ. Ресурс, оплаченный по сегодня, уже в 00:01
+    показывался просроченным на день, и в кабинете, и в телеграме.
+
+    Живёт здесь, рядом с as_utc: считают по этой формуле и страницы (main.py),
+    и оповещения (alerts.py), а импортировать main из alerts нельзя.
+    """
+    if expires is None:
+        return None
+    return (expires.date() - now.date()).days
+
+
 def as_utc(value: datetime | None) -> datetime | None:
     """Дата из БД — всегда с часовым поясом.
 

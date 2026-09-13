@@ -473,3 +473,140 @@ def test_showroom_links_disappear_with_the_showroom(client, monkeypatch):
         assert f'href="{gone}"' not in html, f"ссылка {gone} ведёт в 404 во внутреннем контуре"
     assert 'href="/docs"' in html, "документация нужна и своим разработчикам"
     assert 'href="/signup"' not in html, "регистрации во внутреннем контуре нет"
+
+# ---------- партия 3: ресурсы и сроки ----------
+
+
+def test_a_resource_paid_through_today_is_not_expired():
+    """«Оплачено до 13.09» значит, что 13 сентября ещё оплачено. Вычитание
+    моментов давало ровно суточную ошибку: в 00:01 того же дня ресурс уже
+    показывался просроченным — и в кабинете, и в телеграме."""
+    from datetime import datetime, timezone
+
+    from app.models import days_left
+
+    today = datetime(2026, 9, 13, 0, 1, tzinfo=timezone.utc)
+    paid_through_today = datetime(2026, 9, 13, 0, 0, tzinfo=timezone.utc)
+    assert days_left(paid_through_today, today) == 0
+
+    tomorrow = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)
+    assert days_left(tomorrow, today) == 1
+
+    yesterday = datetime(2026, 9, 12, 0, 0, tzinfo=timezone.utc)
+    assert days_left(yesterday, today) == -1
+
+    # и вечером того же дня ответ тот же — момент внутри суток не важен
+    late = datetime(2026, 9, 13, 23, 59, tzinfo=timezone.utc)
+    assert days_left(paid_through_today, late) == 0
+    assert days_left(None, late) is None
+
+
+def test_resource_state_calls_today_expiring_not_expired(client):
+    from datetime import datetime, timedelta, timezone
+
+    from app.main import _resource_state
+    from app.models import Resource
+
+    now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
+    today = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 13, tzinfo=timezone.utc))
+    assert _resource_state(today, now, 7)["code"] == "soon"
+    assert _resource_state(today, now, 7)["days"] == 0
+
+    gone = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 11, tzinfo=timezone.utc))
+    assert _resource_state(gone, now, 7)["code"] == "expired"
+    assert _resource_state(gone, now, 7)["days"] == -2, "просрочка завышена на день"
+
+
+def test_payments_in_other_currencies_are_not_silently_dropped(client):
+    """Подписка у зарубежного поставщика — основной сценарий раздела. Итог
+    считался только по рублёвым строкам, и оплата картой за $20 показывала
+    «0,00 ₽» без единого признака, что часть платежей отброшена."""
+    admin = _admin_client()
+    _signup(client, "audit_cur@test.local", name="Валютный")
+    owner = _customer("audit_cur@test.local")
+
+    admin.post(
+        "/admin/resources/new",
+        data={"kind": "subscription", "name": "Подписка за доллары",
+              "owner_customer_id": str(owner.id), "expires_at": "2027-01-01"},
+    )
+
+    async def _rid():
+        async with SessionLocal() as session:
+            from app.models import Resource
+
+            return (
+                await session.execute(
+                    select(Resource).where(Resource.name == "Подписка за доллары")
+                )
+            ).scalar_one().id
+
+    rid = asyncio.run(_rid())
+    assert admin.post(
+        f"/admin/resources/{rid}/pay",
+        data={"amount": "20", "currency": "USD", "period_end": "2027-06-01"},
+    ).status_code in (200, 303)
+
+    page = admin.get("/admin/resources").text
+    row = page[page.index("Подписка за доллары") :][:1200]
+    assert "20,00" in row and "$" in row, "валютный платёж не показан"
+    assert "0,00&nbsp;₽" not in row, "вместо платежа показан ноль"
+
+
+def test_a_typo_in_the_date_can_be_fixed_without_sql(client):
+    """Оплата двигает срок только вперёд — это защита от опечатки. Пока
+    правки не было вовсе, та же защита делала опечатку неустранимой:
+    «оплачено до 2036» навсегда выпадало из предупреждений."""
+    admin = _admin_client()
+    _signup(client, "audit_typo@test.local", name="Опечаткин")
+    owner = _customer("audit_typo@test.local")
+
+    admin.post(
+        "/admin/resources/new",
+        data={"kind": "proxy", "name": "Прокси с опечаткой",
+              "owner_customer_id": str(owner.id), "expires_at": "2036-09-30"},
+    )
+
+    async def _resource():
+        async with SessionLocal() as session:
+            from app.models import Resource
+
+            return (
+                await session.execute(
+                    select(Resource).where(Resource.name == "Прокси с опечаткой")
+                )
+            ).scalar_one()
+
+    res = asyncio.run(_resource())
+    assert res.expires_at.year == 2036
+
+    r = admin.post(
+        f"/admin/resources/{res.id}/edit",
+        data={"name": "Прокси исправленный", "owner_customer_id": str(owner.id),
+              "account": "login@vpn", "url": "", "expires_at": "2026-10-01", "note": ""},
+    )
+    assert r.status_code in (200, 303)
+
+    fixed = asyncio.run(_resource_by_id(res.id))
+    assert fixed.expires_at.year == 2026, "срок не удалось подвинуть назад"
+    assert fixed.name == "Прокси исправленный"
+    assert fixed.account == "login@vpn"
+
+
+def test_only_an_admin_can_edit_a_resource(client):
+    _signup(client, "audit_noedit@test.local")
+    r = client.post(
+        "/admin/resources/1/edit",
+        data={"name": "чужое", "owner_customer_id": "1"},
+    )
+    assert r.status_code in (302, 303, 403), f"неадмин правит ресурсы: {r.status_code}"
+
+
+def _resource_by_id(resource_id):
+    async def _get():
+        async with SessionLocal() as session:
+            from app.models import Resource
+
+            return await session.get(Resource, resource_id)
+
+    return _get()
