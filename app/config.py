@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 120
     rate_limit_per_window: int = 30
     rate_limit_window_seconds: int = 60
+    # Потолок на размер тела запроса, проверяется ДО разбора формы и до
+    # проверки сессии (см. BodySizeLimitMiddleware): иначе аноним одним POST
+    # заставляет сервис принять файл любого размера. Заметно больше
+    # максимального вложения в чат (5 МБ) и заметно меньше диска контейнера.
+    max_request_body_bytes: int = 8 * 1024 * 1024
     telegram_bot_token: str = ""
     telegram_default_model: str = "gpt-5-mini"
     # Резерв под вызов (1.1 доработок) считается по max_tokens клиента, если

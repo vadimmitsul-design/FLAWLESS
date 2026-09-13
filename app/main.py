@@ -183,6 +183,42 @@ async def lifespan(app: FastAPI):
 # занят нашей собственной документацией для клиентов. Вторая: встроенная
 # схема FastAPI отдавалась анонимно и перечисляла ВСЕ маршруты, включая
 # выключенные флагами разделы (находка разбора 2026-09-08).
+class BodySizeLimitMiddleware:
+    """Потолок на размер запроса ДО разбора тела.
+
+    Проверка «файл не больше 5 МБ» в обработчике чата срабатывала уже после
+    того, как файл целиком прочитан: FastAPI разбирает multipart раньше, чем
+    решает зависимости, то есть раньше проверки сессии. Любой человек из
+    интернета, без аккаунта, мог одним POST заставить сервис принять и
+    сбуферизовать файл произвольного размера.
+
+    Смотрим Content-Length: он есть у любого обычного загрузчика. Запрос без
+    него (chunked) этой проверкой не ловится — там режет уже обработчик,
+    читающий чанками.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length":
+                try:
+                    if int(value) > settings.max_request_body_bytes:
+                        response = JSONResponse(
+                            {"detail": "тело запроса слишком велико"}, status_code=413
+                        )
+                        await response(scope, receive, send)
+                        return
+                except ValueError:
+                    pass
+                break
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(
     title="Flawless",
     lifespan=lifespan,
@@ -190,6 +226,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(CSRFOriginMiddleware)
 app.add_middleware(
     SessionMiddleware,
@@ -390,6 +427,12 @@ async def forgot_password_submit(
     email: str = Form(...),
     session: AsyncSession = Depends(get_session),
 ):
+    # Единственный инструмент восстановления пароля — очередь у администратора,
+    # и наливать в неё мог кто угодно без ограничений: страница заявок тонет,
+    # настоящая заявка теряется среди мусора. Ключ по IP — тот же, что у входа:
+    # кто именно шлёт, здесь неизвестно, это и подбирают.
+    if not ratelimit.check_login(request.client.host if request.client else "unknown"):
+        raise HTTPException(status_code=429, detail="слишком много попыток, подождите")
     customer = (
         await session.execute(
             select(Customer).where(Customer.email == email.strip().lower(), Customer.active)
@@ -841,6 +884,43 @@ _CURRENCY_SIGNS = {"RUB": "₽", "USD": "$", "EUR": "€"}
 
 # Пагинации в проекте нет нигде; страница истории показывает последние
 # вызовы, а всё за период отдаёт выгрузка — она не ограничена.
+# Excel, LibreOffice и Google Sheets исполняют ячейку, начинающуюся с
+# = + - @ (а также с табуляции и возврата каретки), как ФОРМУЛУ. Имя клиент
+# задаёт себе сам при регистрации, а выгрузку открывает бухгалтер на своём
+# ноутбуке — и один клик по «ссылке» отправляет чужие email и балансы из
+# соседних строк на чужой сервер. Апостроф впереди заставляет табличный
+# редактор показать значение как текст.
+_CSV_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_cell(value) -> str:
+    text = "" if value is None else str(value)
+    if text.startswith(_CSV_FORMULA_START):
+        return "'" + text
+    return text
+
+
+def _money_field(raw: str, field: str, *, allow_negative: bool = False) -> Decimal | None:
+    """Денежное поле формы -> Decimal или None, если поле пустое.
+
+    Один разбор на все формы: раньше значение уходило прямо в Decimal(), и
+    любой ввод, которого Decimal не понимает — русская запятая «1,5», пробел
+    между тысячами, опечатка — давал 500 на денежной форме вместо внятной
+    ошибки. Отрицательное значение при этом принималось молча и блокировало
+    ключ: `0 >= -5` истинно всегда.
+    """
+    cleaned = (raw or "").strip().replace(",", ".").replace("\u00a0", "").replace(" ", "")
+    if not cleaned:
+        return None
+    try:
+        value = Decimal(cleaned)
+    except (InvalidOperation, ValueError):
+        raise HTTPException(status_code=400, detail=f"{field}: не похоже на сумму — «{raw}»")
+    if not allow_negative and value < 0:
+        raise HTTPException(status_code=400, detail=f"{field}: сумма не может быть отрицательной")
+    return value
+
+
 _USAGE_PAGE_LIMIT = 200
 
 _RESOURCE_KIND_TITLES = {
@@ -1602,8 +1682,8 @@ async def usage_csv(
         writer.writerow(
             [
                 e.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                llm.alias_for(e.provider, e.model) or e.model,
-                key_name,
+                _csv_cell(llm.alias_for(e.provider, e.model) or e.model),
+                _csv_cell(key_name),
                 e.input_tokens or 0,
                 e.output_tokens or 0,
                 f"{(e.charged_rub or Decimal(0)):.4f}".replace(".", ","),
@@ -1682,8 +1762,8 @@ async def set_api_key_limits(
     api_key = await session.get(ApiKey, key_id)
     if api_key is None or api_key.customer_id != customer.id:
         raise HTTPException(status_code=404)
-    api_key.daily_limit_rub = Decimal(daily_limit_rub) if daily_limit_rub.strip() else None
-    api_key.monthly_limit_rub = Decimal(monthly_limit_rub) if monthly_limit_rub.strip() else None
+    api_key.daily_limit_rub = _money_field(daily_limit_rub, "лимит в день")
+    api_key.monthly_limit_rub = _money_field(monthly_limit_rub, "лимит в месяц")
     await session.commit()
     return RedirectResponse("/", status_code=303)
 
@@ -2525,8 +2605,8 @@ async def admin_customers_csv(
         writer.writerow(
             [
                 label,
-                c.name,
-                c.email,
+                _csv_cell(c.name),
+                _csv_cell(c.email),
                 c.role,
                 stats.get("calls", 0),
                 f"{stats.get('spent', Decimal(0)):.4f}".replace(".", ","),
@@ -2872,8 +2952,8 @@ async def admin_set_api_key_limits(
     api_key = await session.get(ApiKey, key_id)
     if api_key is None:
         raise HTTPException(status_code=404)
-    api_key.admin_daily_limit_rub = Decimal(daily_limit_rub) if daily_limit_rub.strip() else None
-    api_key.admin_monthly_limit_rub = Decimal(monthly_limit_rub) if monthly_limit_rub.strip() else None
+    api_key.admin_daily_limit_rub = _money_field(daily_limit_rub, "потолок в день")
+    api_key.admin_monthly_limit_rub = _money_field(monthly_limit_rub, "потолок в месяц")
     await session.commit()
     return RedirectResponse("/admin/api-keys", status_code=303)
 
@@ -3659,9 +3739,19 @@ async def web_chat_send(
     content_parts = None  # None -> просто текст; иначе список частей (текст+картинка)
     extra_text = ""
     if file is not None and file.filename:
-        data = await file.read()
-        if len(data) > _CHAT_MAX_UPLOAD_BYTES:
+        # Размер известен парсеру до чтения — отказываем, не материализуя
+        # файл в памяти. Чтение всё равно чанками: на запрос без
+        # Content-Length (chunked) размер заранее неизвестен.
+        if (file.size or 0) > _CHAT_MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=400, detail="file too large (5MB max)")
+        chunks: list[bytes] = []
+        read = 0
+        while chunk := await file.read(64 * 1024):
+            read += len(chunk)
+            if read > _CHAT_MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=400, detail="file too large (5MB max)")
+            chunks.append(chunk)
+        data = b"".join(chunks)
         attachment_name = file.filename
         content_type = file.content_type or ""
         ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""

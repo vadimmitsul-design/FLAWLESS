@@ -14,6 +14,7 @@ import re
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app import billing, llm, pricing
@@ -910,3 +911,96 @@ def test_history_needs_a_login(client):
     client.post("/logout")
     assert client.get("/usage", follow_redirects=False).status_code in (302, 303)
     assert client.get("/usage.csv", follow_redirects=False).status_code in (302, 303)
+
+
+# ---------- партия 6: безопасность и денежные поля ----------
+
+
+def test_csv_export_does_not_carry_formulas(client):
+    """Имя клиент задаёт себе сам при регистрации, а выгрузку открывает
+    бухгалтер. Ячейка, начинающаяся с =, исполняется как формула, и один
+    клик отправляет чужие email и балансы из соседних строк наружу."""
+    from app import main
+
+    assert main._csv_cell('=HYPERLINK("https://evil.tld")').startswith("'=")
+    assert main._csv_cell("+1") .startswith("'+")
+    assert main._csv_cell("-5").startswith("'-")
+    assert main._csv_cell("@x").startswith("'@")
+    assert main._csv_cell("Иванов") == "Иванов"
+    assert main._csv_cell(None) == ""
+
+    _signup(client, "audit_formula@test.local", name='=HYPERLINK("https://evil.tld","отчёт")')
+    admin = _admin_client()
+    body = admin.get("/admin/customers.csv").content.decode("utf-8")
+    assert '=HYPERLINK' in body, "проверяем не то — имени вообще нет в выгрузке"
+    for line in body.splitlines()[1:]:
+        for cell in line.split(";"):
+            assert not cell.startswith("="), f"формула уехала в выгрузку: {cell[:40]}"
+
+
+def test_money_fields_understand_a_russian_comma(client):
+    from app import main
+
+    assert main._money_field("1,5", "лимит") == Decimal("1.5")
+    assert main._money_field("1 000,25", "лимит") == Decimal("1000.25")
+    assert main._money_field("  ", "лимит") is None
+    assert main._money_field("10", "лимит") == Decimal("10")
+
+    with pytest.raises(HTTPException) as bad:
+        main._money_field("вагон", "лимит")
+    assert bad.value.status_code == 400
+
+    with pytest.raises(HTTPException) as negative:
+        main._money_field("-5", "лимит")
+    assert negative.value.status_code == 400
+
+
+def test_a_comma_in_the_limit_form_is_an_error_not_a_500(client):
+    """Раньше «1,5» роняло денежную форму в 500, а «-5» принималось молча и
+    ключ навсегда отвечал 429: 0 >= -5 истинно всегда."""
+    _signup(client, "audit_limitform@test.local")
+    r = client.post("/api-key/regenerate", data={"name": "k"})
+    key_id = _key_ids("audit_limitform@test.local")[0]
+
+    assert client.post(
+        f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "1,5", "monthly_limit_rub": ""}
+    ).status_code in (200, 303), "русская запятая должна приниматься"
+
+    bad = client.post(
+        f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "вагон", "monthly_limit_rub": ""}
+    )
+    assert bad.status_code == 400, f"нечисловое значение дало {bad.status_code}"
+
+    negative = client.post(
+        f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "-5", "monthly_limit_rub": ""}
+    )
+    assert negative.status_code == 400, "отрицательный лимит принят — ключ заблокирован навсегда"
+
+
+def test_oversized_request_is_refused_before_anything_is_parsed(client):
+    """Форма разбирается раньше проверки сессии, поэтому аноним мог заставить
+    сервис принять файл любого размера. Потолок стоит до разбора тела."""
+    from app.config import settings as app_settings
+
+    client.post("/logout")
+    big = b"x" * (app_settings.max_request_body_bytes + 1024)
+    r = client.post(
+        "/chat/send",
+        data={"model": "gpt-5-mini", "message": "привет"},
+        files={"file": ("big.bin", big, "application/octet-stream")},
+    )
+    assert r.status_code == 413, f"тело пропущено дальше: {r.status_code}"
+
+
+def test_password_reset_queue_cannot_be_flooded(client):
+    """Единственный инструмент восстановления пароля — очередь у
+    администратора. Настоящая заявка тонула бы среди мусора."""
+    from app import ratelimit
+
+    ratelimit._login_hits.clear()
+    statuses = []
+    for i in range(14):
+        r = client.post("/forgot-password", data={"email": f"audit_flood{i}@test.local"})
+        statuses.append(r.status_code)
+    assert 429 in statuses, "очередь заявок наливается без ограничений"
+    ratelimit._login_hits.clear()
