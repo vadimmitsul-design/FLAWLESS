@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # продавать: сотрудник заходит сразу в кабинет. Выключенная витрина
     # отдаёт 404 по своим адресам, а «/» ведёт на вход.
     enable_public_site: bool = True
+    # Ресурсы со сроком (прокси, подписки): что компания купила у внешнего
+    # поставщика и до какого числа оплачено. Вещь внутренняя — клиентскому
+    # контуру не нужна.
+    enable_resources: bool = True
+    # За сколько дней до конца срока начинать предупреждать.
+    resource_expiry_warn_days: int = 7
     enable_shop: bool = True
     enable_prompts: bool = True
     enable_children: bool = True

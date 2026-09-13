@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Мои ресурсы — Flawless{% endblock %}
+
+{% block head %}
+<style>
+  .res-page{padding:36px 0 90px;max-width:900px;}
+  .res-head{border-bottom:1px solid var(--border);padding-bottom:22px;margin-bottom:30px;}
+  .res-head h1{font-size:30px;}
+  .res-head p{font-size:15px;line-height:1.6;color:var(--text-dim);margin:12px 0 0;max-width:62ch;}
+
+  .res{display:grid;grid-template-columns:1fr auto;gap:8px 24px;align-items:baseline;
+    padding:18px 0 20px 18px;border-top:1px solid var(--border);border-left:3px solid var(--border);}
+  .res:last-child{border-bottom:1px solid var(--border);}
+  .res.soon{border-left-color:var(--warn);}
+  .res.expired{border-left-color:var(--bad);}
+  .res.ok{border-left-color:var(--accent);}
+
+  .res-name{font-size:16.5px;font-weight:700;}
+  .res-kind{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--text-faint);margin-left:10px;}
+  .res-meta{grid-column:1 / -1;font-size:14px;line-height:1.6;color:var(--text-dim);margin:0;}
+  .res-meta code{font-size:12.5px;}
+  .res-when{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:13.5px;
+    font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right;}
+  .res-when b{display:block;font-size:12px;font-weight:700;letter-spacing:.05em;
+    text-transform:uppercase;margin-bottom:4px;}
+  .res-when.soon b{color:var(--warn);}
+  .res-when.expired b{color:var(--bad);}
+  .res-when.ok b{color:var(--accent);}
+  .res-when.unknown b{color:var(--text-faint);}
+
+  .empty{font-size:15px;color:var(--text-faint);}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap res-page">
+
+  <div class="res-head">
+    <h1>Мои ресурсы</h1>
+    <p>
+      Прокси, подписки и прочее, что закреплено за вами. Оплачивает и продлевает
+      администратор — здесь видно, до какого числа оплачено, чтобы не узнать об
+      окончании в момент, когда всё перестало работать.
+    </p>
+  </div>
+
+  {% if not items %}
+  <p class="empty">За вами пока ничего не закреплено.</p>
+  {% else %}
+  {% for item in items %}
+  <div class="res {{ item.state.code }}">
+    <div>
+      <span class="res-name">{{ item.r.name }}</span><span class="res-kind">{{ item.kind_title }}</span>
+    </div>
+    <div class="res-when {{ item.state.code }}">
+      <b>{{ item.state.title }}</b>
+      {% if item.r.expires_at %}
+        до {{ item.r.expires_at.strftime("%d.%m.%Y") }}
+        {% if item.state.days is not none and item.state.days >= 0 %}
+          · {{ item.state.days }}
+          {%- if item.state.days % 10 == 1 and item.state.days % 100 != 11 %} день
+          {%- elif item.state.days % 10 in [2, 3, 4] and item.state.days % 100 not in [12, 13, 14] %} дня
+          {%- else %} дней{% endif %}
+        {% endif %}
+      {% else %}—{% endif %}
+    </div>
+    <p class="res-meta">
+      {% if item.r.provider %}{{ item.r.provider }}{% endif %}
+      {% if item.r.account %}{% if item.r.provider %} · {% endif %}<code>{{ item.r.account }}</code>{% endif %}
+      {% if item.r.url %} · <a href="{{ item.r.url }}" target="_blank" rel="noopener">панель поставщика →</a>{% endif %}
+      {% if item.r.note %}<br>{{ item.r.note }}{% endif %}
+    </p>
+  </div>
+  {% endfor %}
+
+  <p class="blk-note" style="margin-top:26px;">
+    Нужно продлить или что-то не так — напишите администратору.
+    Предупреждение об окончании уходит ему за {{ warn_days }}
+    {%- if warn_days % 10 == 1 and warn_days % 100 != 11 %} день
+    {%- elif warn_days % 10 in [2, 3, 4] and warn_days % 100 not in [12, 13, 14] %} дня
+    {%- else %} дней{% endif %}.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

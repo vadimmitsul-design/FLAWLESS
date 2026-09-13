@@ -29,7 +29,7 @@ from app import billing, dlp, llm, pricing, ratelimit, reaper, telegram_bot
 from app.csrf import CSRFOriginMiddleware
 from app.config import session_secret_is_weak, settings
 from app.db import SessionLocal, get_session
-from app.models import (
+from app.models import (  # noqa: F401  as_utc используется в расчёте сроков
     ApiKey,
     Customer,
     DialogueArchive,
@@ -39,6 +39,9 @@ from app.models import (
     InviteCode,
     ModelPrice,
     Prompt,
+    Resource,
+    ResourcePayment,
+    as_utc,
     SubscriptionOrder,
     TelegramLink,
     TelegramLinkCode,
@@ -86,6 +89,10 @@ class _FeatureFlags:
     @property
     def enable_public_site(self) -> bool:
         return settings.enable_public_site
+
+    @property
+    def enable_resources(self) -> bool:
+        return settings.enable_resources
 
     @property
     def enable_shop(self) -> bool:
@@ -202,6 +209,10 @@ def _require_feature(enabled: bool) -> None:
 # тела функции: так про них нельзя забыть, дописывая обработчик.
 def _feature_public_site() -> None:
     _require_feature(settings.enable_public_site)
+
+
+def _feature_resources() -> None:
+    _require_feature(settings.enable_resources)
 
 
 def _feature_shop() -> None:
@@ -762,6 +773,243 @@ async def page_solutions(slug: str, request: Request, session: AsyncSession = De
     if path not in _MARKETING_INDEX:
         raise HTTPException(status_code=404)
     return await _render_marketing(request, path, session)
+
+
+# ---------- ресурсы со сроком (прокси, подписки) ----------
+
+_RESOURCE_KIND_TITLES = {
+    "proxy": "Прокси",
+    "subscription": "Подписка",
+    "domain": "Домен",
+    "service": "Сервис",
+    "other": "Другое",
+}
+
+
+def _parse_date(raw: str | None) -> datetime | None:
+    """Дата из формы (YYYY-MM-DD) в UTC-полночь. Пустое поле — это None, а не
+    ошибка: срок может быть неизвестен."""
+    if not raw or not raw.strip():
+        return None
+    try:
+        return datetime.strptime(raw.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"не похоже на дату: {raw}")
+
+
+def _resource_state(resource: Resource, now: datetime, warn_days: int) -> dict:
+    """Состояние считается из даты, а не хранится: хранимый статус протухает
+    молча в ту же секунду, как проходит срок."""
+    expires = as_utc(resource.expires_at)
+    if expires is None:
+        return {"code": "unknown", "title": "Срок не указан", "days": None}
+    left = (expires - now).days
+    if left < 0:
+        return {"code": "expired", "title": "Просрочен", "days": left}
+    if left <= warn_days:
+        return {"code": "soon", "title": "Истекает", "days": left}
+    return {"code": "ok", "title": "Активен", "days": left}
+
+
+async def _resources_with_state(
+    session: AsyncSession, *, owner_id: int | None = None, include_archived: bool = False
+) -> list[dict]:
+    stmt = select(Resource)
+    if owner_id is not None:
+        stmt = stmt.where(Resource.owner_customer_id == owner_id)
+    if not include_archived:
+        stmt = stmt.where(Resource.archived.is_(False))
+    # Сначала то, что горит: просроченные и истекающие наверх.
+    rows = (await session.execute(stmt.order_by(Resource.expires_at.is_(None), Resource.expires_at))).scalars().all()
+
+    now = utcnow()
+    warn = settings.resource_expiry_warn_days
+    paid = dict(
+        (resource_id, total)
+        for resource_id, total in (
+            await session.execute(
+                select(ResourcePayment.resource_id, func.coalesce(func.sum(ResourcePayment.amount), 0))
+                .where(ResourcePayment.currency == "RUB")
+                .group_by(ResourcePayment.resource_id)
+            )
+        ).all()
+    )
+    return [
+        {
+            "r": r,
+            "state": _resource_state(r, now, warn),
+            "kind_title": _RESOURCE_KIND_TITLES.get(r.kind, r.kind),
+            "paid_total_rub": paid.get(r.id, 0),
+        }
+        for r in rows
+    ]
+
+
+@app.get("/resources", dependencies=[Depends(_feature_resources)])
+async def my_resources(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Сотрудник видит только свои ресурсы — они закреплены за человеком."""
+    if customer is None:
+        return RedirectResponse("/login", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "resources.html",
+        {
+            "customer": customer,
+            "items": await _resources_with_state(session, owner_id=customer.id),
+            "warn_days": settings.resource_expiry_warn_days,
+        },
+    )
+
+
+@app.get("/admin/resources", dependencies=[Depends(_feature_resources)])
+async def admin_resources(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    show: str = "active",
+):
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    items = await _resources_with_state(session, include_archived=(show == "all"))
+    people = (
+        await session.execute(select(Customer).where(Customer.active).order_by(Customer.name))
+    ).scalars().all()
+    payments = (
+        await session.execute(
+            select(ResourcePayment).order_by(ResourcePayment.paid_at.desc()).limit(30)
+        )
+    ).scalars().all()
+    owners = {c.id: c for c in (await session.execute(select(Customer))).scalars().all()}
+    return templates.TemplateResponse(
+        request,
+        "admin_resources.html",
+        {
+            "customer": customer,
+            "items": items,
+            "people": people,
+            "payments": payments,
+            "owners": owners,
+            "kinds": Resource.KINDS,
+            "kind_titles": _RESOURCE_KIND_TITLES,
+            "show": show,
+            "warn_days": settings.resource_expiry_warn_days,
+        },
+    )
+
+
+@app.post("/admin/resources/new", dependencies=[Depends(_feature_resources)])
+async def admin_resource_create(
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    kind: str = Form("proxy"),
+    name: str = Form(...),
+    provider: str = Form(""),
+    owner_customer_id: int = Form(...),
+    account: str = Form(""),
+    url: str = Form(""),
+    expires_at: str = Form(""),
+    note: str = Form(""),
+):
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    if kind not in Resource.KINDS:
+        raise HTTPException(status_code=400, detail=f"неизвестный вид ресурса: {kind}")
+    owner = await session.get(Customer, owner_customer_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="сотрудник не найден")
+    session.add(
+        Resource(
+            kind=kind,
+            name=name.strip(),
+            provider=provider.strip() or None,
+            owner_customer_id=owner_customer_id,
+            account=account.strip() or None,
+            url=url.strip() or None,
+            expires_at=_parse_date(expires_at),
+            note=note.strip() or None,
+            created_by_admin_id=customer.id,
+        )
+    )
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
+
+
+@app.post("/admin/resources/{resource_id}/pay", dependencies=[Depends(_feature_resources)])
+async def admin_resource_pay(
+    resource_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    amount: Decimal = Form(...),
+    currency: str = Form("RUB"),
+    paid_at: str = Form(""),
+    period_end: str = Form(...),
+    note: str = Form(""),
+):
+    """Оплата за период. Продление НЕ правит старую запись, а добавляет новую
+    в журнал: иначе история платежей стирается и на вопрос «сколько ушло на
+    прокси за квартал» ответить нечем."""
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    resource = await session.get(Resource, resource_id)
+    if resource is None:
+        raise HTTPException(status_code=404)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="сумма должна быть больше нуля")
+    if currency not in ResourcePayment.CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"валюта {currency} не поддерживается")
+    end = _parse_date(period_end)
+    if end is None:
+        raise HTTPException(status_code=400, detail="укажите, до какого числа оплачено")
+
+    session.add(
+        ResourcePayment(
+            resource_id=resource.id,
+            amount=amount,
+            currency=currency,
+            paid_at=_parse_date(paid_at) or utcnow(),
+            period_start=resource.expires_at,
+            period_end=end,
+            note=note.strip() or None,
+            created_by_admin_id=customer.id,
+        )
+    )
+    # Срок двигаем вперёд, а не назад: повторная запись задним числом не
+    # должна «укорачивать» уже оплаченный период — одна опечатка в дате
+    # иначе делает рабочий прокси просроченным.
+    current = as_utc(resource.expires_at)
+    if current is None or end > current:
+        resource.expires_at = end
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
+
+
+@app.post("/admin/resources/{resource_id}/archive", dependencies=[Depends(_feature_resources)])
+async def admin_resource_archive(
+    resource_id: int,
+    request: Request,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Архив вместо удаления: на ресурс ссылается журнал платежей, и история
+    расходов компании не должна исчезать вместе с отменённой подпиской."""
+    redirect = _require_admin(customer)
+    if redirect:
+        return redirect
+    resource = await session.get(Resource, resource_id)
+    if resource is None:
+        raise HTTPException(status_code=404)
+    resource.archived = not resource.archived
+    await session.commit()
+    return RedirectResponse("/admin/resources", status_code=303)
 
 
 # ---------- веб: кабинет ----------

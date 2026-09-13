@@ -30,6 +30,18 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(value: datetime | None) -> datetime | None:
+    """Дата из БД — всегда с часовым поясом.
+
+    PostgreSQL возвращает timestamptz с tzinfo, SQLite — наивный datetime,
+    и любое вычитание из aware-даты падает с TypeError. Прод и тесты у нас
+    на разных движках, поэтому всё, что попадает в арифметику на стороне
+    Python, прогоняется через это.
+    """
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
 class Base(DeclarativeBase):
     pass
 
@@ -453,6 +465,69 @@ class WebMessage(Base):
     content: Mapped[str] = mapped_column(Text)
     attachment_name: Mapped[str | None] = mapped_column(Text)
     usage_event_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("usage_events.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+
+
+class Resource(Base):
+    """Ресурс со сроком: прокси, подписка, домен — то, что компания покупает
+    у внешнего поставщика и что однажды кончается.
+
+    Закреплён за человеком: сотрудник видит в кабинете свои, администратор —
+    все. Деньги за такие вещи НЕ проходят через рублёвый кошелёк сервиса:
+    администратор платит картой у поставщика и фиксирует факт, поэтому
+    wallet_ledger здесь ни при чём (решение заказчика 2026-09-13).
+
+    ПАРОЛЕЙ ЗДЕСЬ НЕТ. `account` — логин или идентификатор у поставщика,
+    `url` — адрес его панели. Хранить рабочие доступы нельзя: сервис не
+    хранилище секретов, шифрования на диске нет, аудита чтения нет.
+    """
+
+    __tablename__ = "resources"
+
+    KINDS = ("proxy", "subscription", "domain", "service", "other")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, default="proxy", server_default="proxy")
+    name: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(Text)
+    owner_customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    account: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
+    # Оплачено до. Статус считается из этой даты, а не хранится рядом:
+    # хранимый статус протухает молча в ту же секунду, как проходит срок.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(Text)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, server_default=func.now()
+    )
+
+
+class ResourcePayment(Base):
+    """Факт оплаты ресурса за период — тот самый «журнал с суммами».
+
+    Продление не правит старую строку, а добавляет новую: иначе история
+    платежей стирается при каждом продлении и на вопрос «сколько ушло на
+    прокси за квартал» ответить нечем. `period_end` последнего платежа
+    становится новым `expires_at` ресурса.
+    """
+
+    __tablename__ = "resource_payments"
+
+    CURRENCIES = ("RUB", "USD", "EUR")
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_id: Mapped[int] = mapped_column(ForeignKey("resources.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(Text, default="RUB", server_default="RUB")
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(Text)
+    created_by_admin_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, server_default=func.now()
     )

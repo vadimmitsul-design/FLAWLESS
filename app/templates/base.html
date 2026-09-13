@@ -411,6 +411,7 @@
         {% if features.enable_shop %}<a class="nav-link" href="/shop">Магазин</a>{% endif %}
         {% if features.enable_prompts %}<a class="nav-link" href="/prompts">Промпты</a>{% endif %}
         {% if features.enable_archive %}<a class="nav-link" href="/archive">Архив</a>{% endif %}
+        {% if features.enable_resources %}<a class="nav-link" href="/resources">Ресурсы</a>{% endif %}
         <a class="nav-link" href="/docs">Документация</a>
       </nav>
     </div>
@@ -431,6 +432,7 @@
           <a href="/admin/topups">Пополнения</a>
           {% if features.enable_shop %}<a href="/admin/orders">Заказы</a>{% endif %}
           <a href="/admin/reconciliation">Сверка и маржа</a>
+          {% if features.enable_resources %}<a href="/admin/resources">Ресурсы и сроки</a>{% endif %}
           <div class="sep"></div>
           <a href="/admin/api-keys">API-ключи</a>
           <a href="/admin/password-resets">Сброс паролей</a>

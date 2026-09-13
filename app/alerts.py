@@ -17,7 +17,8 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Customer, TelegramLink, UsageEvent, utcnow
+from app.config import settings
+from app.models import Customer, Resource, TelegramLink, UsageEvent, as_utc, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,42 @@ async def _collect_problems(session: AsyncSession) -> list[tuple[str, str]]:
                 f"Похоже на проблему у провайдера или с ключами.",
             )
         )
+
+    if settings.enable_resources:
+        # Прокси и подписки кончаются молча: узнать об этом в момент, когда
+        # всё перестало работать, — худший вариант. Предупреждаем заранее.
+        soon = utcnow() + timedelta(days=settings.resource_expiry_warn_days)
+        rows = (
+            await session.execute(
+                select(Resource, Customer.name)
+                .join(Customer, Customer.id == Resource.owner_customer_id, isouter=True)
+                .where(
+                    Resource.archived.is_(False),
+                    Resource.expires_at.is_not(None),
+                    Resource.expires_at <= soon,
+                )
+                .order_by(Resource.expires_at)
+            )
+        ).all()
+        now = utcnow()
+        for resource, owner_name in rows:
+            expires = as_utc(resource.expires_at)
+            left = (expires - now).days
+            who = f" ({owner_name})" if owner_name else ""
+            if left < 0:
+                text = (
+                    f"🔴 Flawless: «{resource.name}»{who} ПРОСРОЧЕН "
+                    f"{-left} дн. назад — оплачено было до "
+                    f"{expires.strftime('%d.%m.%Y')}"
+                )
+            else:
+                text = (
+                    f"⏳ Flawless: «{resource.name}»{who} истекает через {left} дн. — "
+                    f"оплачено до {resource.expires_at.strftime('%d.%m.%Y')}"
+                )
+            # Ключ с датой окончания: продлили — ключ сменился, и о новом
+            # сроке предупредят заново, а не промолчат из-за антиспама.
+            problems.append((f"resource:{resource.id}:{expires:%Y-%m-%d}", text))
 
     return problems
 
