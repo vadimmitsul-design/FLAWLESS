@@ -62,6 +62,7 @@ from app.security import (
     get_customer_by_api_key,
     hash_api_key,
     hash_password,
+    password_problem,
     verify_password,
 )
 
@@ -337,6 +338,10 @@ async def signup_submit(
             {"error": message, "invite_required": invite_required},
             status_code=status_code,
         )
+
+    problem = password_problem(password)
+    if problem is not None:
+        return _fail(problem.capitalize() + ".", 400)
 
     invite_code = None
     if invite_required:

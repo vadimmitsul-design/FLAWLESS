@@ -32,7 +32,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://neurohub:${POSTGRES_PASSWORD:-neurohub}@db:5432/neurohub
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
-      - "${APP_PORT:-8020}:8000"
+      # APP_BIND по умолчанию 0.0.0.0 — поведение прежнее. На сервере это
+      # означает, что порт открыт всему интернету: либо закрывайте его
+      # фаерволом, либо ставьте APP_BIND=127.0.0.1 и ходите через SSH-туннель.
+      # См. DEPLOY.md.
+      - "${APP_BIND:-0.0.0.0}:${APP_PORT:-8020}:8000"
     depends_on:
       db:
         condition: service_healthy

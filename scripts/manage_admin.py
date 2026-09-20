@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models import Customer
-from app.security import hash_password
+from app.security import hash_password, password_problem
 
 
 async def main(email: str, name: str, password: str) -> None:
@@ -47,4 +47,9 @@ if __name__ == "__main__":
     parser.add_argument("--name", required=True)
     parser.add_argument("--password", required=True)
     args = parser.parse_args()
+    problem = password_problem(args.password)
+    if problem is not None:
+        # argparse с required=True требует, чтобы флаг БЫЛ, но пустое значение
+        # пропускает. Так однажды и завели администратора без пароля.
+        parser.error(f"--password: {problem}")
     asyncio.run(main(args.email, args.name, args.password))
