@@ -241,6 +241,41 @@ class BodySizeLimitMiddleware:
         await self.app(scope, receive, send)
 
 
+class NoStoreMiddleware:
+    """Запрещает браузеру и промежуточным прокси кэшировать ЛЮБОЙ ответ.
+
+    Ни одна страница в сервисе не годится для кэша: разметка каждой зависит
+    от того, вошёл ли человек (шапка кабинета против анонимной, «В кабинет»
+    против «Создать аккаунт»), а сервис не отдаёт ни одного статического
+    файла отдельно от HTML — кэшировать в принципе нечего, кроме как во
+    вред. Без заголовка нашёлся живой случай (2026-09-21): администратор
+    открывает /docs анонимно ДО входа, затем логинится и переходит в
+    документацию по ссылке из кабинета — браузер вместо нового запроса к
+    серверу подставляет старый ответ из своего HTTP-кэша, показывая
+    анонимную шапку с «Создать аккаунт» поверх уже активной сессии. Сервер
+    при этом всё отдаёт верно (проверено тем же куки через curl) — дыра
+    была именно в отсутствии заголовка, разрешающего браузеру решать
+    самому.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def _send_with_no_store(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                headers.append((b"cache-control", b"no-store, private"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, _send_with_no_store)
+
+
 app = FastAPI(
     title="Flawless",
     lifespan=lifespan,
@@ -263,6 +298,10 @@ app.add_middleware(
     same_site="lax",
     https_only=settings.environment == "production",
 )
+# Самый внешний слой — добавлен последним, значит видит уже готовый ответ
+# (после сессии и сжатия) и точно успевает дописать заголовок в любой ответ,
+# каким бы обработчиком он ни был собран.
+app.add_middleware(NoStoreMiddleware)
 
 
 def _require_feature(enabled: bool) -> None:
