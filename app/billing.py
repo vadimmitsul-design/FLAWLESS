@@ -675,8 +675,25 @@ async def charge_prompt_fee(
        всё равно фиксируем (услуга оказана, долг виден в журнале), роялти —
        нет, с записью в лог.
     """
-    payer = await session.get(Customer, billing_customer_id, with_for_update=True)
-    author = await session.get(Customer, prompt.author_customer_id)
+    # Блокируем ОБА аккаунта сразу, в одном и том же порядке — по возрастанию
+    # id — независимо от того, кто в этом вызове платит, а кто автор. Иначе
+    # вызов A (платит X, автор Y) и встречный вызов B (платит Y, автор X),
+    # выполняясь одновременно, блокируют те же две строки в ПРОТИВОПОЛОЖНОМ
+    # порядке: A держит X и ждёт Y, B держит Y и ждёт X — классический
+    # deadlock, Postgres обрывает одну из двух транзакций с ошибкой. Порядок
+    # берём по «сырым» id (billing_customer_id / prompt.author_customer_id),
+    # не по разрешённому кошельку, — дальше по коду мутируется и читается
+    # именно строка автора, а не его родитель.
+    author_id = prompt.author_customer_id
+    if author_id == billing_customer_id:
+        payer = await session.get(Customer, billing_customer_id, with_for_update=True)
+        author = payer
+    elif author_id < billing_customer_id:
+        author = await session.get(Customer, author_id, with_for_update=True)
+        payer = await session.get(Customer, billing_customer_id, with_for_update=True)
+    else:
+        payer = await session.get(Customer, billing_customer_id, with_for_update=True)
+        author = await session.get(Customer, author_id, with_for_update=True)
     if author is not None and resolve_billing_customer_id(author) == billing_customer_id:
         return
 
@@ -701,8 +718,10 @@ async def charge_prompt_fee(
         event.charged_rub = (event.charged_rub or Decimal(0)) + prompt.price_rub
 
     if author is not None and payer.balance_rub >= 0:
+        # author уже заблокирован выше, вместе с payer, — второй раз брать
+        # лок здесь не нужно (и в старой редакции именно это лишнее
+        # обращение стояло не в общем порядке с payer, отсюда и deadlock).
         royalty = (prompt.price_rub * _ROYALTY_SHARE).quantize(_RUB_QUANT)
-        author = await session.get(Customer, prompt.author_customer_id, with_for_update=True)
         session.add(
             WalletLedger(
                 customer_id=author.id,

@@ -87,7 +87,18 @@ def compute_cost(price: ModelPrice | None, usage: UsageAmounts) -> Decimal | Non
     if price.price_per_image is not None and usage.images_count:
         total += price.price_per_image * usage.images_count
         priced = True
-    add(price.price_per_1m_input_tokens, usage.input_text_tokens)
+    # cached_tokens — ПОДМНОЖЕСТВО input_text_tokens (так их отдаёт OpenAI:
+    # prompt_tokens_details.cached_tokens входит в prompt_tokens, а не
+    # добавляется к нему; LiteLLM пробрасывает поле как есть). Раньше вся
+    # сумма input_text_tokens шла по полной input-ставке, а кэшированная
+    # часть ЕЩЁ РАЗ добавлялась ниже по ставке кэша — задвоение. Пока
+    # price_per_1m_cached_tokens не заполнена (сейчас так у всех моделей),
+    # веткой ниже никто не пользуется, и поведение не меняется: клиент
+    # платит полную ставку за все токены, как и раньше.
+    input_tokens = usage.input_text_tokens
+    if price.price_per_1m_cached_tokens is not None and usage.cached_tokens:
+        input_tokens = max(0, (input_tokens or 0) - usage.cached_tokens)
+    add(price.price_per_1m_input_tokens, input_tokens)
     add(price.price_per_1m_input_image_tokens, usage.input_image_tokens)
     add(price.price_per_1m_output_tokens, usage.output_tokens)
     add(price.price_per_1m_cached_tokens, usage.cached_tokens)

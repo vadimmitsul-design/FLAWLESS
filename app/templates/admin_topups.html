@@ -25,7 +25,8 @@
     <form class="inline" method="post" action="/admin/topups/{{ t.id }}/confirm">
       <button type="submit" style="height:36px;padding:0 14px;font-size:13px;">Деньги пришли</button>
     </form>
-    <form class="inline" method="post" action="/admin/topups/{{ t.id }}/reject">
+    <form class="inline" method="post" action="/admin/topups/{{ t.id }}/reject"
+          data-confirm="Отклонить заявку {{ c.name }} на {{ "%.2f"|format(t.amount_rub) }} ₽?">
       <button type="submit" class="secondary" style="height:36px;padding:0 14px;font-size:13px;">Отклонить</button>
     </form>
     {% endif %}

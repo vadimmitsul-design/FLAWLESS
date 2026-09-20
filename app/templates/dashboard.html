@@ -209,10 +209,15 @@
   </div>
   {% endif %}
 
-  {% if spend.daily_limit or spend.monthly_limit %}
+  {# `is not none`, а не голая истинность: потолок 0 ₽ — осознанное значение
+     («сегодня не тратить вовсе»), и billing.py его так и применяет — первый
+     же вызов получает 429. Проверка на истинность считала 0.0 отсутствием
+     потолка, и человек с полностью перекрытым расходом не видел на своей
+     же странице ни строки об этом — просто ошибку при первой попытке. #}
+  {% if spend.daily_limit is not none or spend.monthly_limit is not none %}
   <div class="caps">
-    {% if spend.daily_limit %}
-    {% set pct = spend.spent_today / spend.daily_limit * 100 %}
+    {% if spend.daily_limit is not none %}
+    {% set pct = (spend.spent_today / spend.daily_limit * 100) if spend.daily_limit else 100 %}
     <div>
       <div class="cap-row">
         <span>Потолок на сегодня</span>
@@ -222,10 +227,11 @@
         <div class="cap-fill {% if pct >= 90 %}bad{% elif pct >= 70 %}warn{% endif %}"
              style="width:max(4px, {{ [pct, 100]|min|round(1) }}%);"></div>
       </div>
+      {% if not spend.daily_limit %}<div class="cap-row" style="margin-top:4px;color:var(--bad);">Потолок 0 ₽ — сегодня расход заблокирован полностью.</div>{% endif %}
     </div>
     {% endif %}
-    {% if spend.monthly_limit %}
-    {% set pctm = spend.spent_month / spend.monthly_limit * 100 %}
+    {% if spend.monthly_limit is not none %}
+    {% set pctm = (spend.spent_month / spend.monthly_limit * 100) if spend.monthly_limit else 100 %}
     <div>
       <div class="cap-row">
         <span>Потолок на месяц</span>
@@ -235,6 +241,7 @@
         <div class="cap-fill {% if pctm >= 90 %}bad{% elif pctm >= 70 %}warn{% endif %}"
              style="width:max(4px, {{ [pctm, 100]|min|round(1) }}%);"></div>
       </div>
+      {% if not spend.monthly_limit %}<div class="cap-row" style="margin-top:4px;color:var(--bad);">Потолок 0 ₽ — в этом месяце расход заблокирован полностью.</div>{% endif %}
     </div>
     {% endif %}
   </div>
@@ -460,7 +467,8 @@
             {{ (k.admin_monthly_limit_rub|money ~ " ₽/мес") if k.admin_monthly_limit_rub is not none else "" }}
           </div>
           {% endif %}
-          <form method="post" action="/api-keys/{{ k.id }}/revoke" style="margin-top:10px;">
+          <form method="post" action="/api-keys/{{ k.id }}/revoke" style="margin-top:10px;"
+                data-confirm="Отозвать ключ «{{ k.name or "Без названия" }}»? Всё, что подключено этим ключом, перестанет работать сразу — отменить нельзя.">
             <button type="submit" class="secondary"
                     style="height:32px;padding:0 12px;font-size:12.5px;">Отозвать</button>
           </form>

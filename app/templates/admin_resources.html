@@ -156,7 +156,13 @@
       Показана часть списка.<a href="/admin/resources{% if show == 'all' %}?show=all{% endif %}">Снять фильтры</a>
     </p>
     {% endif %}
+  </div>
+  {% endif %}
 
+  {# Заявки — ВНЕ блока дашборда сроков: тот скрыт, пока не заведено ни
+     одного ресурса (total_count == 0), а первая заявка сотрудника обычно
+     приходит именно тогда — до неё дашборду ещё нечего показывать. Заявки
+     должны быть видны в любом случае. #}
   {% if pending %}
   <div class="blk" style="border-top-color:var(--warn);">
     <h2>Заявки сотрудников — {{ pending|length }}</h2>
@@ -200,7 +206,7 @@
             <button type="submit" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">Оплачено</button>
           </form>
           <form method="post" action="/admin/resource-requests/{{ r.id }}/reject"
-                style="display:flex;gap:8px;align-items:end;margin-top:8px;">
+                style="display:flex;gap:8px;align-items:end;margin-top:8px;" data-confirm="Отклонить заявку? Причину увидит сотрудник.">
             <div style="flex:1;max-width:420px;">
               <label style="font-size:11px;color:var(--text-faint);display:block;margin-bottom:3px;">Причина отказа</label>
               <input name="decision_note" placeholder="чтобы человек понял и не подавал то же самое снова">
@@ -213,9 +219,6 @@
       {% endfor %}
       </tbody>
     </table>
-  </div>
-  {% endif %}
-
   </div>
   {% endif %}
 
@@ -295,7 +298,8 @@
           {%- else -%}—{%- endif -%}
         </td>
         <td>
-          <form method="post" action="/admin/resources/{{ item.r.id }}/archive">
+          <form method="post" action="/admin/resources/{{ item.r.id }}/archive"
+                {% if not item.r.archived %}data-confirm="В архив: ресурс пропадёт из «Действующих» и перестанет попадать в счётчики и предупреждения о сроке."{% endif %}>
             <button type="submit" class="secondary" style="height:30px;padding:0 10px;font-size:12px;">
               {{ "Вернуть" if item.r.archived else "В архив" }}
             </button>

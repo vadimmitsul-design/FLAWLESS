@@ -52,7 +52,8 @@
   </td>
   <td>
     {% if r.c.id != customer.id %}
-    <form class="inline" method="post" action="/admin/customers/{{ r.c.id }}/toggle-active">
+    <form class="inline" method="post" action="/admin/customers/{{ r.c.id }}/toggle-active"
+          {% if r.c.active %}data-confirm="Отключить {{ r.c.name }}? Немедленно закроет вход в кабинет и все его API-ключи."{% endif %}>
       <button type="submit" class="secondary" style="height:34px;padding:0 12px;font-size:13px;">
         {{ "Отключить" if r.c.active else "Включить" }}
       </button>

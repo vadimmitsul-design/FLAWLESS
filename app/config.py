@@ -33,24 +33,6 @@ def email_domain_allowed(email: str, raw_domains: str) -> bool:
     return bool(domain) and domain in domains
 
 
-def allowed_signup_domains(raw: str) -> list[str]:
-    """Строка настройки -> список доменов в нижнем регистре, без «@»."""
-    return [
-        item.strip().lstrip("@").lower()
-        for item in (raw or "").split(",")
-        if item.strip().lstrip("@")
-    ]
-
-
-def email_domain_allowed(email: str, raw_domains: str) -> bool:
-    """Пустой список доменов означает «любая почта», а не «никакая»."""
-    domains = allowed_signup_domains(raw_domains)
-    if not domains:
-        return True
-    _, _, domain = (email or "").strip().lower().rpartition("@")
-    return bool(domain) and domain in domains
-
-
 def session_secret_is_weak(secret: str) -> bool:
     """Кука сессии подписывается этим значением (не шифруется). Угадал строку —
     подписал себе куку любого клиента, включая админа."""
@@ -68,17 +50,6 @@ class Settings(BaseSettings):
     #   open   — любой желающий (публичный реселлинг, второй этап)
     #   closed — регистрация выключена совсем, аккаунты заводит админ
     signup_mode: str = "invite"
-    # Домены почты, с которых разрешено регистрироваться самостоятельно.
-    # Через запятую, «@» можно не писать: «rossi.ru» или «@rossi.ru,rossi.com».
-    # Пусто — ограничения нет (так работает клиентский контур).
-    #
-    # ВАЖНО, чем это НЕ является: почта здесь не подтверждается — письма
-    # сервис не шлёт вообще. Проверка домена отсекает посторонних и опечатки,
-    # но не доказывает, что человек владеет этим ящиком: адрес вида
-    # «кто-угодно@rossi.ru» пройдёт. Ущерб при этом ограничен — новый аккаунт
-    # заводится с нулевым балансом и не может потратить ничего, пока
-    # администратор не начислит бюджет.
-    signup_allowed_email_domains: str = ""
     # Домены почты, с которых разрешено регистрироваться самостоятельно.
     # Через запятую, «@» можно не писать: «rossi.ru» или «@rossi.ru,rossi.com».
     # Пусто — ограничения нет (так работает клиентский контур).

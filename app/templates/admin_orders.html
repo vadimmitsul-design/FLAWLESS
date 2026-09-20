@@ -26,7 +26,8 @@
     <form class="inline" method="post" action="/admin/orders/{{ o.id }}/fulfill">
       <button type="submit">Оплачено провайдеру</button>
     </form>
-    <form class="inline" method="post" action="/admin/orders/{{ o.id }}/refund">
+    <form class="inline" method="post" action="/admin/orders/{{ o.id }}/refund"
+          data-confirm="Вернуть {{ "%.2f"|format(o.price_rub) }} ₽ на баланс {{ c.name }}? Действие необратимо.">
       <button type="submit" class="secondary">Вернуть деньги</button>
     </form>
     {% endif %}

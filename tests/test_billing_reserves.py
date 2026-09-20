@@ -133,8 +133,13 @@ def test_cache_write_tokens_priced_separately_from_cache_read():
         input_text_tokens=1000, output_tokens=500, cached_tokens=200, cache_write_tokens=100
     )
     cost = pricing.compute_cost(price, usage)
+    # cached_tokens — подмножество input_text_tokens (спецификация OpenAI:
+    # prompt_tokens_details.cached_tokens входит в prompt_tokens, не сверх
+    # него), поэтому по полной input-ставке идёт только НЕ кэшированный
+    # остаток: 1000 - 200 = 800 (находка аудита 2026-09-21, до фикса здесь
+    # стояло 1000 — тест сам утверждал задвоение как норму).
     expected = (
-        Decimal("3") * 1000 / 1_000_000
+        Decimal("3") * 800 / 1_000_000
         + Decimal("15") * 500 / 1_000_000
         + Decimal("0.3") * 200 / 1_000_000
         + Decimal("3.75") * 100 / 1_000_000

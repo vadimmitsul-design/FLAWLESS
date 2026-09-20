@@ -2212,6 +2212,14 @@ async def create_child(
         return RedirectResponse("/login", status_code=303)
     if customer.is_child:
         raise HTTPException(status_code=403, detail="child accounts cannot create children")
+    # Форма раньше пускала пароль от 6 символов (minlength в разметке), а
+    # hash_password требует 8 и на более коротком бросает необработанный
+    # ValueError — родитель получал голый 500 вместо понятной причины.
+    problem = password_problem(password)
+    if problem is not None:
+        return templates.TemplateResponse(
+            request, "child_new.html", {"customer": customer, "error": problem.capitalize() + "."}, status_code=400
+        )
     email = email.strip().lower()
     exists = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one_or_none()
     if exists is not None:

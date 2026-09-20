@@ -566,6 +566,18 @@ applyThemeIcon();
     if (e.key === 'Escape') drops.forEach(function(d){ d.removeAttribute('open'); });
   });
 })();
+
+// Подтверждение перед необратимым или неожиданным действием: отозвать ключ,
+// отключить коллегу, отклонить заявку, вернуть деньги, сгенерировать новый
+// пароль — раньше это был один клик без единого предупреждения, и опечатка
+// мышью стоила чужого доступа или денег. Один атрибут вместо confirm() в
+// каждом обработчике — новая форма получает защиту, просто унаследовав
+// разметку. Без скрипта форма отправляется как обычно, ничего не ломается.
+document.addEventListener('submit', function(e){
+  var form = e.target;
+  var text = form && form.getAttribute && form.getAttribute('data-confirm');
+  if (text && !window.confirm(text)) e.preventDefault();
+});
 </script>
 </body>
 </html>
