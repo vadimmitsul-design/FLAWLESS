@@ -34,7 +34,20 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Скрипт по документированному выше сценарию лежит в /tmp/rotate.py — родитель
+# родителя такого пути это "/", и там нет каталога app. Вычисляем путь ДВУМЯ
+# способами и берём первый, где app/ реально нашёлся: "рядом с самим файлом"
+# работает при запуске из настоящего checkout (scripts/rotate_admin_password.py),
+# /neurohub — фиксированный WORKDIR образа (см. Dockerfile) и есть всегда,
+# когда скрипт запущен внутри контейнера через docker exec, независимо от
+# того, куда его занесли. Без этой развилки первый прогон падал уже на
+# импорте: ModuleNotFoundError: No module named 'app'.
+for _root in (Path(__file__).resolve().parent.parent, Path("/neurohub")):
+    if (_root / "app").is_dir():
+        sys.path.insert(0, str(_root))
+        break
+else:
+    raise SystemExit(f"не нашёл каталог app/ ни рядом со скриптом, ни в /neurohub")
 
 from sqlalchemy import select  # noqa: E402
 
