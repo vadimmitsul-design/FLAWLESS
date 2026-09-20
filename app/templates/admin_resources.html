@@ -185,7 +185,14 @@
           {% if r.reason %}<span class="sub">{{ r.reason }}</span>{% endif %}
         </td>
         <td class="who">{{ owners[r.customer_id].name if r.customer_id in owners else "—" }}</td>
-        <td class="sum">{% if r.estimated_amount %}{{ r.estimated_amount|money }}&nbsp;₽{% else %}—{% endif %}</td>
+        {# Раньше здесь была захардкожена ₽ — заявка Хасаи М.В. на $116
+           показывалась как «116,00 ₽»: сумма верная, знак валюты враньё.
+           Валюта у заявки хранится своим полем, вот он и нужен. #}
+        <td class="sum">
+          {%- if r.estimated_amount -%}
+            {{ r.estimated_amount|money }}&nbsp;{{ {"RUB":"₽","USD":"$","EUR":"€"}.get(r.currency, r.currency) }}
+          {%- else -%}—{%- endif -%}
+        </td>
         <td class="when">{{ r.created_at.strftime("%d.%m.%Y") }}</td>
       </tr>
       <tr>

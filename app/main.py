@@ -1166,6 +1166,7 @@ async def request_resource(
     account: str = Form(""),
     period_months: str = Form(""),
     estimated_amount: str = Form(""),
+    currency: str = Form("RUB"),
     reason: str = Form(""),
 ):
     """Заявку подаёт сам сотрудник — в этом и смысл: администратор не должен
@@ -1176,6 +1177,12 @@ async def request_resource(
         raise HTTPException(status_code=400, detail=f"неизвестный вид: {kind}")
     if not name.strip():
         raise HTTPException(status_code=400, detail="опишите, что именно нужно")
+    # Раньше поля валюты не было вовсе — форма молча писала в базу RUB,
+    # каким бы ни был реальный курс подписки (ChatGPT/Claude/OpenRouter
+    # продаются в долларах, и такие заявки в очереди у администратора
+    # показывали доллары со знаком рубля — находка 2026-09-21).
+    if currency not in ResourcePayment.CURRENCIES:
+        raise HTTPException(status_code=400, detail=f"валюта {currency} не поддерживается")
 
     def _positive_int(raw: str, field: str) -> int | None:
         if not raw.strip():
@@ -1206,6 +1213,7 @@ async def request_resource(
             account=account.strip() or None,
             period_months=_positive_int(period_months, "срок"),
             estimated_amount=amount,
+            currency=currency,
             reason=reason.strip() or None,
         )
     )

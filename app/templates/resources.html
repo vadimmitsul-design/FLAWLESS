@@ -136,7 +136,22 @@
       <div><label>Поставщик</label><input name="provider" placeholder="необязательно"></div>
       <div><label>На какой аккаунт</label><input name="account" placeholder="логин или почта у поставщика"></div>
       <div><label>Срок, месяцев</label><input name="period_months" type="number" min="1" placeholder="1"></div>
-      <div><label>Примерная сумма, ₽</label><input name="estimated_amount" type="number" step="0.01" min="0.01" placeholder="необязательно"></div>
+      <div>
+        <label>Примерная сумма</label>
+        <input name="estimated_amount" type="number" step="0.01" min="0.01" placeholder="необязательно">
+      </div>
+      <div>
+        {# Многие подписки (ChatGPT/Claude/OpenRouter) продаются в долларах —
+           поле было намертво подписано «Примерная сумма, ₽», и заявку в
+           валюте отправить было нельзя физически: селектора не было вовсе,
+           а сервер всегда писал в базу RUB, что бы человек ни имел в виду. #}
+        <label>Валюта</label>
+        <select name="currency">
+          <option value="RUB">₽ рубли</option>
+          <option value="USD">$ доллары</option>
+          <option value="EUR">€ евро</option>
+        </select>
+      </div>
       <div class="wide"><label>Зачем нужно</label><input name="reason" placeholder="чтобы администратор решал по существу"></div>
       <div class="wide"><button type="submit" style="height:44px;">Отправить заявку</button></div>
     </form>
