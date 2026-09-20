@@ -47,6 +47,25 @@ def days_left(expires: datetime | None, now: datetime) -> int | None:
     return (expires.date() - now.date()).days
 
 
+def days_phrase(left: int | None) -> str:
+    """Сколько осталось — словами.
+
+    Одно правило на всех: те же формулировки собирались руками и на странице
+    администратора, и в тексте телеграм-оповещения (app/alerts.py), и уже
+    один раз разошлись на сутки. «0» пишем словом «сегодня»: цифра ноль
+    читается как «всё, кончилось», а по days_left сегодня ещё оплачено.
+    """
+    if left is None:
+        return "срок не указан"
+    if left < 0:
+        return f"просрочен на {-left} дн."
+    if left == 0:
+        return "истекает сегодня"
+    if left == 1:
+        return "истекает завтра"
+    return f"истекает через {left} дн."
+
+
 def as_utc(value: datetime | None) -> datetime | None:
     """Дата из БД — всегда с часовым поясом.
 

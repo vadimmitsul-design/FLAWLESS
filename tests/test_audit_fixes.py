@@ -556,8 +556,16 @@ def test_payments_in_other_currencies_are_not_silently_dropped(client):
         data={"amount": "20", "currency": "USD", "period_end": "2027-06-01"},
     ).status_code in (200, 303)
 
+    # Режем ровно по строке таблицы, а не по «первым N символам после
+    # названия»: разметка строки меняется, окно фиксированной длины от этого
+    # ломается, и тест начинает падать на правках вёрстки, а не на дефекте.
     page = admin.get("/admin/resources").text
-    row = page[page.index("Подписка за доллары") :][:1200]
+    # Ищем внутри ТАБЛИЦЫ: название встречается и выше — в сводной строке
+    # дашборда «ближайший срок — …», и поиск от начала страницы попадал бы
+    # туда, где никаких сумм нет.
+    table = page[page.index('class="rtab"') :]
+    start = table.rindex("<tr", 0, table.index("Подписка за доллары"))
+    row = table[start : table.index("</tr>", start)]
     assert "20,00" in row and "$" in row, "валютный платёж не показан"
     assert "0,00&nbsp;₽" not in row, "вместо платежа показан ноль"
 

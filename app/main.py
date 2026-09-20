@@ -50,6 +50,7 @@ from app.models import (  # noqa: F401  as_utc используется в ра�
     ResourceRequest,
     as_utc,
     days_left,
+    days_phrase,
     SubscriptionOrder,
     TelegramLink,
     TelegramLinkCode,
@@ -1025,8 +1026,11 @@ async def _resources_with_state(
         stmt = stmt.where(Resource.owner_customer_id == owner_id)
     if not include_archived:
         stmt = stmt.where(Resource.archived.is_(False))
-    # Сначала то, что горит: просроченные и истекающие наверх.
-    rows = (await session.execute(stmt.order_by(Resource.expires_at.is_(None), Resource.expires_at))).scalars().all()
+    # Порядок задаётся ниже, в Python: SQL-сортировка по дате возрастанию
+    # давала обратное задуманному — подписка, просроченная восемь месяцев
+    # назад и всеми брошенная, вставала НАД прокси, истёкшим вчера. Чем
+    # дольше строка гниёт, тем выше лезла.
+    rows = (await session.execute(stmt.order_by(Resource.name))).scalars().all()
 
     now = utcnow()
     warn = settings.resource_expiry_warn_days
@@ -1046,10 +1050,11 @@ async def _resources_with_state(
         )
     ).all():
         paid.setdefault(resource_id, {})[currency] = total
-    return [
+    items = [
         {
             "r": r,
             "state": _resource_state(r, now, warn),
+            "phrase": days_phrase(_resource_state(r, now, warn)["days"]),
             "kind_title": _RESOURCE_KIND_TITLES.get(r.kind, r.kind),
             "paid_totals": [
                 {"sign": _CURRENCY_SIGNS.get(cur, cur), "amount": total}
@@ -1058,6 +1063,26 @@ async def _resources_with_state(
         }
         for r in rows
     ]
+    items.sort(key=_resource_order)
+    return items
+
+
+# Порядок корзин на дашборде. Внутри корзины сортировка РАЗНАЯ, и это
+# осознанно: среди просроченных выше стоит свежий (его чинят), а не
+# годичной давности (его архивируют); среди истекающих — ближайший.
+_RESOURCE_BUCKETS = {"expired": 0, "soon": 1, "unknown": 2, "ok": 3}
+
+
+def _resource_order(item: dict) -> tuple:
+    state = item["state"]
+    bucket = _RESOURCE_BUCKETS.get(state["code"], 9)
+    days = state["days"]
+    name = (item["r"].name or "").lower()
+    if days is None:
+        return (bucket, 0, name)
+    if state["code"] == "expired":
+        return (bucket, -days, name)
+    return (bucket, days, name)
 
 
 @app.get("/resources", dependencies=[Depends(_feature_resources)])
@@ -1149,17 +1174,57 @@ async def request_resource(
     return RedirectResponse("/resources", status_code=303)
 
 
+_RESOURCE_FILTERS = ("expired", "soon", "unknown", "ok")
+
+
+def _owner_suffix(owners: dict, item: dict) -> str:
+    """« (Иванов, бэкенд)» — или пусто, если владелец не найден."""
+    person = owners.get(item["r"].owner_customer_id)
+    if person is None:
+        return ""
+    who = person.name
+    if person.job_title:
+        who += f", {person.job_title}"
+    return f" ({who})"
+
+
 @app.get("/admin/resources", dependencies=[Depends(_feature_resources)])
 async def admin_resources(
     request: Request,
     customer: Customer | None = Depends(get_current_customer),
     session: AsyncSession = Depends(get_session),
     show: str = "active",
+    f: str = "",
+    owner: str = "",
 ):
+    """Дашборд сроков: кто, что, когда кончается.
+
+    Счётчики сверху — они же фильтры (`?f=`), поэтому считаются из уже
+    загруженного списка: ни одного дополнительного запроса к базе.
+    """
     redirect = _require_admin(customer)
     if redirect:
         return redirect
     items = await _resources_with_state(session, include_archived=(show == "all"))
+
+    # Полный список нужен и счётчикам, и сводке: фильтр не должен менять
+    # смысл фразы «что сегодня».
+    all_items = items
+    counts = {code: 0 for code in _RESOURCE_FILTERS}
+    for item in items:
+        code = item["state"]["code"]
+        if code in counts:
+            counts[code] += 1
+
+    owner_id = None
+    if owner.strip():
+        try:
+            owner_id = int(owner)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="владелец указан неверно")
+        items = [i for i in items if i["r"].owner_customer_id == owner_id]
+    if f in _RESOURCE_FILTERS:
+        items = [i for i in items if i["state"]["code"] == f]
     people = (
         await session.execute(select(Customer).where(Customer.active).order_by(Customer.name))
     ).scalars().all()
@@ -1184,12 +1249,40 @@ async def admin_resources(
             .limit(15)
         )
     ).scalars().all()
+    # Строка «что сегодня» — единственное, что администратор обязан
+    # прочитать, зайдя на страницу. Она никогда не пустая: если ничего не
+    # горит, называет ближайший срок. Считается по ПОЛНОМУ списку, а не по
+    # отфильтрованному, — иначе фильтр менял бы смысл сводки.
+    burning = [i for i in all_items if i["state"]["code"] in ("expired", "soon")]
+    upcoming = [i for i in all_items if i["state"]["code"] == "ok"]
+    if burning:
+        first = burning[0]
+        today_line = (
+            f"Требует внимания: {len(burning)}. Ближе всех — «{first['r'].name}»"
+            f"{_owner_suffix(owners, first)}, {first['phrase']}"
+        )
+    elif upcoming:
+        first = upcoming[0]
+        today_line = (
+            f"Ничего не горит. Ближайший срок — «{first['r'].name}»"
+            f"{_owner_suffix(owners, first)}, {first['phrase']}"
+        )
+    elif all_items:
+        today_line = "Ни у одного ресурса не указан срок — система не сможет предупредить об окончании."
+    else:
+        today_line = ""
+
     return templates.TemplateResponse(
         request,
         "admin_resources.html",
         {
             "customer": customer,
             "items": items,
+            "counts": counts,
+            "total_count": len(all_items),
+            "today_line": today_line,
+            "f": f if f in _RESOURCE_FILTERS else "",
+            "owner": str(owner_id) if owner_id is not None else "",
             "pending": pending,
             "decided": decided,
             "people": people,

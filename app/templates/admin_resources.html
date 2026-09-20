@@ -13,6 +13,52 @@
   .blk{border-top:2px solid var(--text);padding-top:20px;margin-bottom:38px;}
   .blk-sub{border-top-color:var(--border);}
   .blk h2{font-size:17px;margin-bottom:6px;}
+  /* ── дашборд сроков ── */
+  .dash{border-top:2px solid var(--text);padding-top:18px;margin-bottom:30px;}
+  .dash-line{font-size:16px;line-height:1.55;margin:0 0 18px;max-width:80ch;}
+  .dash-line b{color:var(--text);}
+  .dash-counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:12px;}
+  .dash-c{display:block;border:1px solid var(--border);border-radius:12px;padding:14px 16px;
+    background:var(--surface);text-decoration:none !important;border-left-width:3px;}
+  .dash-c:hover{border-color:var(--accent);}
+  .dash-c.is-on{border-color:var(--accent);background:var(--accent-wash);}
+  .dash-c b{display:block;font-size:26px;font-family:'JetBrains Mono',monospace;line-height:1.1;}
+  .dash-c span{display:block;font-size:12px;color:var(--text-faint);margin-top:4px;}
+  .dash-c.expired{border-left-color:var(--bad);}
+  .dash-c.expired b{color:var(--bad);}
+  .dash-c.soon{border-left-color:var(--warn);}
+  .dash-c.soon b{color:var(--warn);}
+  .dash-c.unknown{border-left-color:var(--text-faint);}
+  .dash-c.ok{border-left-color:var(--accent-2);}
+  .dash-filters{display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:16px 0 0;}
+  .dash-filters label{font-size:12px;color:var(--text-faint);display:block;margin-bottom:4px;}
+  .dash-drop{font-size:13px;color:var(--text-faint);margin:12px 0 0;}
+  .dash-drop a{margin-left:8px;}
+
+  .rtab tr.expired td:first-child{box-shadow:inset 3px 0 0 var(--bad);}
+  .rtab tr.soon td:first-child{box-shadow:inset 3px 0 0 var(--warn);}
+  .rtab tr.unknown td:first-child{box-shadow:inset 3px 0 0 var(--text-faint);}
+  .left-days{font-family:'JetBrains Mono',monospace;font-size:19px;white-space:nowrap;}
+  .left-days.expired{color:var(--bad);}
+  .left-days.soon{color:var(--warn);}
+  .left-days.unknown{color:var(--text-faint);}
+  @media (max-width:760px){
+    .rtab, .rtab thead, .rtab tbody, .rtab tr, .rtab td, .rtab th{display:block;}
+    .rtab thead{display:none;}
+    .rtab tr{border-top:1px solid var(--border);padding:12px 0;}
+    .rtab td{border:none;padding:3px 0;}
+    .rtab tr.expired td:first-child,.rtab tr.soon td:first-child,
+    .rtab tr.unknown td:first-child{box-shadow:none;padding-left:10px;border-left:3px solid var(--border);}
+  }
+
+  .reqbox{margin:6px 0 4px;}
+  .reqbox summary{cursor:pointer;font-size:13px;color:var(--accent);list-style:none;
+    display:inline-block;padding:4px 0;}
+  .reqbox summary::-webkit-details-marker{display:none;}
+  .reqbox summary::before{content:"▸ ";}
+  .reqbox[open] summary::before{content:"▾ ";}
+  .reqbox summary:hover{color:var(--accent-hi);}
+
   .editbox{margin:10px 0 12px;}
   .editbox summary{cursor:pointer;font-size:13px;color:var(--text-faint);list-style:none;}
   .editbox summary::-webkit-details-marker{display:none;}
@@ -68,6 +114,49 @@
     </div>
   </div>
 
+  {% if total_count %}
+  <div class="dash">
+    <p class="dash-line">{{ today_line }}</p>
+    <div class="dash-counts">
+      {# Счётчик — он же фильтр. Считается из уже загруженного списка,
+         поэтому ни одного лишнего запроса к базе. #}
+      <a class="dash-c expired {% if f == 'expired' %}is-on{% endif %}" href="?f=expired{% if show == 'all' %}&show=all{% endif %}{% if owner %}&owner={{ owner }}{% endif %}">
+        <b>{{ counts.expired }}</b><span>просрочено</span>
+      </a>
+      <a class="dash-c soon {% if f == 'soon' %}is-on{% endif %}" href="?f=soon{% if show == 'all' %}&show=all{% endif %}{% if owner %}&owner={{ owner }}{% endif %}">
+        <b>{{ counts.soon }}</b><span>истекает за {{ warn_days }} дн.</span>
+      </a>
+      <a class="dash-c unknown {% if f == 'unknown' %}is-on{% endif %}" href="?f=unknown{% if show == 'all' %}&show=all{% endif %}{% if owner %}&owner={{ owner }}{% endif %}">
+        <b>{{ counts.unknown }}</b><span>без срока</span>
+      </a>
+      <a class="dash-c ok {% if f == 'ok' %}is-on{% endif %}" href="?f=ok{% if show == 'all' %}&show=all{% endif %}{% if owner %}&owner={{ owner }}{% endif %}">
+        <b>{{ counts.ok }}</b><span>в порядке</span>
+      </a>
+    </div>
+
+    <form method="get" action="/admin/resources" class="dash-filters">
+      {% if show == 'all' %}<input type="hidden" name="show" value="all">{% endif %}
+      {% if f %}<input type="hidden" name="f" value="{{ f }}">{% endif %}
+      <div>
+        <label>За кем закреплено</label>
+        <select name="owner" onchange="this.form.submit()">
+          <option value="">Все сотрудники</option>
+          {% for person in people %}
+          <option value="{{ person.id }}"{% if owner == person.id|string %} selected{% endif %}>
+            {{ person.name }}{% if person.job_title %} — {{ person.job_title }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <noscript><button type="submit" class="secondary" style="height:38px;">Показать</button></noscript>
+    </form>
+
+    {% if f or owner %}
+    <p class="dash-drop">
+      Показана часть списка.<a href="/admin/resources{% if show == 'all' %}?show=all{% endif %}">Снять фильтры</a>
+    </p>
+    {% endif %}
+
   {% if pending %}
   <div class="blk" style="border-top-color:var(--warn);">
     <h2>Заявки сотрудников — {{ pending|length }}</h2>
@@ -95,6 +184,11 @@
       </tr>
       <tr>
         <td colspan="4" style="padding-top:0;border-top:none;">
+          {# Формы свёрнуты: с двумя заявками раскрытые формы занимали
+             весь экран, и до таблицы сроков — ради которой сюда и
+             заходят — приходилось листать мимо них. #}
+          <details class="reqbox">
+            <summary>Решить по заявке</summary>
           <form method="post" action="/admin/resource-requests/{{ r.id }}/fulfil" class="payrow">
             <div><label>Сколько заплатили</label><input name="amount" type="number" step="0.01" min="0.01" required placeholder="0,00"></div>
             <div>
@@ -113,6 +207,7 @@
             </div>
             <button type="submit" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">Отклонить</button>
           </form>
+          </details>
         </td>
       </tr>
       {% endfor %}
@@ -121,26 +216,53 @@
   </div>
   {% endif %}
 
+  </div>
+  {% endif %}
+
   <div class="blk">
     <h2>Что оплачено и до какого числа</h2>
     <p class="blk-note">
-      Просроченные и истекающие — сверху. Предупреждение уходит в телеграм
-      за {{ warn_days }} дней до конца срока.
+      Сверху то, что требует действия: сначала просроченное — свежее выше
+      давно брошенного, — потом истекающее, потом ресурсы без срока. У них
+      срока нет вовсе, поэтому предупредить о них система не может.
+      Предупреждение уходит в телеграм за {{ warn_days }} дней до конца.
     </p>
 
     {% if not items %}
-    <p class="empty">Пока ничего не заведено.</p>
+      {% if f or owner %}
+      <p class="empty">
+        Под этот фильтр ничего не попало — и это хорошая новость.
+        <a href="/admin/resources{% if show == 'all' %}?show=all{% endif %}">Показать всё</a>
+      </p>
+      {% else %}
+      <p class="empty">
+        Пока ничего не заведено. Здесь учитываются прокси, подписки и домены,
+        купленные у внешних поставщиков: за кем закреплено, до какого числа
+        оплачено и сколько на это ушло. Сотрудник может попросить нужное сам
+        на странице «Ресурсы» — заявка придёт сюда.
+      </p>
+      {% endif %}
     {% else %}
     <table class="rtab">
       <thead>
         <tr>
-          <th>Ресурс</th><th>За кем</th><th>Оплачено до</th>
+          <th>Осталось</th><th>Ресурс</th><th>За кем</th><th>Оплачено до</th>
           <th class="sum">Всего уплачено</th><th></th>
         </tr>
       </thead>
       <tbody>
       {% for item in items %}
       <tr class="{{ item.state.code }}">
+        {# Срок первым: вопрос администратора начинается не с названия. #}
+        <td>
+          <span class="left-days {{ item.state.code }}">
+            {%- if item.state.days is none -%}—
+            {%- elif item.state.days < 0 -%}{{ item.state.days }}
+            {%- elif item.state.days == 0 -%}сегодня
+            {%- else -%}{{ item.state.days }} дн.{%- endif -%}
+          </span>
+          <span class="sub">{{ item.phrase }}</span>
+        </td>
         <td>
           <strong>{{ item.r.name }}</strong>
           {% if item.r.archived %}<span class="badge badge-warn" style="margin-left:6px;">архив</span>{% endif %}
@@ -149,15 +271,21 @@
             {%- if item.r.account %} · {{ item.r.account }}{% endif %}
           </span>
         </td>
-        <td class="who">{{ owners[item.r.owner_customer_id].name if item.r.owner_customer_id in owners else "—" }}</td>
+        <td class="who">
+          {%- set person = owners.get(item.r.owner_customer_id) -%}
+          {%- if person -%}
+            <a href="/admin/customers/{{ person.id }}">{{ person.name }}</a>
+            {%- if person.job_title or person.department %}
+            <span class="sub">
+              {{ person.job_title or "" }}{% if person.job_title and person.department %} · {% endif %}{{ person.department or "" }}
+            </span>
+            {%- else %}
+            <span class="sub" style="opacity:.7;">должность не указана</span>
+            {%- endif -%}
+          {%- else -%}—{%- endif -%}
+        </td>
         <td class="when">
           {% if item.r.expires_at %}{{ item.r.expires_at.strftime("%d.%m.%Y") }}{% else %}—{% endif %}
-          <span class="sub">
-            {% if item.state.code == 'expired' %}просрочен на {{ -item.state.days }} дн.
-            {% elif item.state.code == 'soon' %}осталось {{ item.state.days }} дн.
-            {% elif item.state.code == 'ok' %}осталось {{ item.state.days }} дн.
-            {% else %}срок не указан{% endif %}
-          </span>
         </td>
         <td class="sum">
           {%- if item.paid_totals -%}
@@ -203,6 +331,11 @@
             </p>
           </details>
 
+          {# Свёрнута: форма оплаты на КАЖДОЙ строке растягивала таблицу
+             сроков в несколько экранов, а именно она и есть ответ на
+             вопрос «что кончается». #}
+          <details class="reqbox">
+            <summary>Записать оплату</summary>
           <form method="post" action="/admin/resources/{{ item.r.id }}/pay" class="payrow">
             <div><label>Сумма</label><input name="amount" type="number" step="0.01" min="0.01" required placeholder="0,00"></div>
             <div>
@@ -215,6 +348,7 @@
             <div><label>Оплачено до</label><input name="period_end" type="date" required></div>
             <button type="submit" class="secondary" style="height:34px;padding:0 14px;font-size:13px;">Записать оплату</button>
           </form>
+          </details>
         </td>
       </tr>
       {% endfor %}
