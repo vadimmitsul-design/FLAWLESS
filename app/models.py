@@ -76,6 +76,15 @@ class Customer(Base):
     email: Mapped[str] = mapped_column(Text, unique=True)
     password_hash: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
+    # Кто это в компании. Заполняет АДМИНИСТРАТОР на карточке человека, а не
+    # сам человек при регистрации: `name` он вписывает себе сам в поле с
+    # подписью «Имя / компания», и во внутреннем контуре там оказывается
+    # что угодно — «Вадим», «я». NULL честно означает «не заполнено».
+    #
+    # job_title, а не position: POSITION в PostgreSQL — ключевое слово,
+    # и SQLAlchemy такой идентификатор не квотирует.
+    job_title: Mapped[str | None] = mapped_column(Text)
+    department: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, default="customer", server_default="customer")
     balance_rub: Mapped[Decimal] = mapped_column(Numeric(14, 4), default=0, server_default="0")
     # Потолок расхода на ЧЕЛОВЕКА (точнее — на кошелёк), поверх лимитов

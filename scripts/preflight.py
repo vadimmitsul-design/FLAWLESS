@@ -123,10 +123,14 @@ def check_signup(path: Path, env: dict[str, str]) -> None:
     if mode not in ("invite", "open", "closed"):
         fail(f"{path.name}: SIGNUP_MODE={mode} — допустимо invite, open или closed")
     elif mode == "open" and env.get("ENABLE_PUBLIC_SITE", "true").strip().lower() == "false":
-        warn(
-            f"{path.name}: регистрация открыта всем (SIGNUP_MODE=open), а витрины нет — "
-            "для внутреннего контура обычно нужен invite"
-        )
+        # Открытая регистрация во внутреннем контуре нормальна, если она
+        # ограничена доменом рабочей почты. Без ограничения завести аккаунт
+        # сможет любой человек из интернета.
+        if not env.get("SIGNUP_ALLOWED_EMAIL_DOMAINS", "").strip():
+            fail(
+                f"{path.name}: SIGNUP_MODE=open без SIGNUP_ALLOWED_EMAIL_DOMAINS — "
+                "зарегистрироваться сможет кто угодно с любой почтой"
+            )
 
 
 def check_collisions(path: Path, env: dict[str, str]) -> None:

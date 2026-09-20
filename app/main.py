@@ -23,11 +23,17 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import billing, dlp, llm, pricing, ratelimit, reaper, telegram_bot
 from app.csrf import CSRFOriginMiddleware
-from app.config import session_secret_is_weak, settings
+from app.config import (
+    allowed_signup_domains,
+    email_domain_allowed,
+    session_secret_is_weak,
+    settings,
+)
 from app.db import SessionLocal, get_session
 from app.models import (  # noqa: F401  as_utc используется в расчёте сроков
     ApiKey,
@@ -155,6 +161,20 @@ async def lifespan(app: FastAPI):
         )
     if settings.signup_mode not in _SIGNUP_MODES:
         raise RuntimeError(f"SIGNUP_MODE must be one of {sorted(_SIGNUP_MODES)}, got '{settings.signup_mode}'")
+    if settings.signup_mode == "open":
+        domains = allowed_signup_domains(settings.signup_allowed_email_domains)
+        if domains:
+            logger.info(
+                "регистрация открыта, но только с почтой: %s",
+                ", ".join("@" + d for d in domains),
+            )
+        else:
+            # Не ошибка — так работает клиентский контур. Но во внутреннем
+            # это означает, что завести аккаунт может кто угодно из интернета.
+            logger.warning(
+                "SIGNUP_MODE=open без SIGNUP_ALLOWED_EMAIL_DOMAINS — "
+                "зарегистрироваться сможет любой человек с любой почтой"
+            )
     llm.init_router()
     await _report_model_readiness()
     telegram_task = None
@@ -227,6 +247,13 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+# Сжатие. Весь CSS и JS живут инлайном в шаблонах (статики у приложения нет),
+# поэтому каждая страница едет целиком: замерено на внутреннем контуре —
+# /login 33 КБ, кабинет 48 КБ, /resources 40 КБ, и ни байта сжатия.
+# Одна строка режет это примерно впятеро и стоит дешевле любой другой правки
+# по части «не грузить сервис». minimum_size — чтобы не тратить процессор на
+# редиректы и короткие JSON-ответы.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(BodySizeLimitMiddleware)
 app.add_middleware(CSRFOriginMiddleware)
 app.add_middleware(
@@ -314,7 +341,13 @@ async def signup_form(request: Request):
     if settings.signup_mode == "closed":
         return templates.TemplateResponse(request, "signup_closed.html", {}, status_code=403)
     return templates.TemplateResponse(
-        request, "signup.html", {"error": None, "invite_required": settings.signup_mode == "invite"}
+        request,
+        "signup.html",
+        {
+            "error": None,
+            "invite_required": settings.signup_mode == "invite",
+            "allowed_domains": allowed_signup_domains(settings.signup_allowed_email_domains),
+        },
     )
 
 
@@ -331,11 +364,17 @@ async def signup_submit(
         return templates.TemplateResponse(request, "signup_closed.html", {}, status_code=403)
     invite_required = settings.signup_mode == "invite"
 
+    allowed_domains = allowed_signup_domains(settings.signup_allowed_email_domains)
+
     def _fail(message: str, status_code: int):
         return templates.TemplateResponse(
             request,
             "signup.html",
-            {"error": message, "invite_required": invite_required},
+            {
+                "error": message,
+                "invite_required": invite_required,
+                "allowed_domains": allowed_domains,
+            },
             status_code=status_code,
         )
 
@@ -357,6 +396,15 @@ async def signup_submit(
             return _fail("Код приглашения не найден или уже использован", 400)
 
     email = email.strip().lower()
+    # Домен проверяем ДО проверки на занятость: человеку с посторонней почтой
+    # незачем узнавать, зарегистрирован ли уже такой адрес.
+    if not email_domain_allowed(email, settings.signup_allowed_email_domains):
+        return _fail(
+            "Зарегистрироваться можно только с рабочей почтой: "
+            + ", ".join("@" + d for d in allowed_domains),
+            400,
+        )
+
     exists = (
         await session.execute(select(Customer).where(Customer.email == email))
     ).scalar_one_or_none()
@@ -2846,6 +2894,37 @@ async def _pricing_page_context(session: AsyncSession, customer: Customer, error
         "error": error,
         "example_rub": billing.price_in_rub(_PRICING_EXAMPLE_COST_USD, cfg),
     }
+
+
+@app.post("/admin/customers/{customer_id}/card")
+async def admin_customer_card(
+    customer_id: int,
+    customer: Customer | None = Depends(get_current_customer),
+    session: AsyncSession = Depends(get_session),
+    name: str = Form(...),
+    job_title: str = Form(""),
+    department: str = Form(""),
+):
+    """Кто этот человек в компании.
+
+    ФИО правит администратор, потому что сам человек вписывает себе `name`
+    при регистрации в поле с подписью «Имя / компания» — во внутреннем
+    контуре там оказывается «Вадим» или «я», а на дашборде сроков нужно
+    понимать, кому продлевать подписку.
+    """
+    redirect = _require_admin(customer)
+    if redirect is not None:
+        return redirect
+    target = await session.get(Customer, customer_id)
+    if target is None:
+        raise HTTPException(status_code=404)
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="имя не может быть пустым")
+    target.name = name.strip()
+    target.job_title = job_title.strip() or None
+    target.department = department.strip() or None
+    await session.commit()
+    return RedirectResponse(f"/admin/customers/{customer_id}", status_code=303)
 
 
 @app.post("/admin/customers/{customer_id}/limits")

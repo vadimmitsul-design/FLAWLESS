@@ -17,9 +17,17 @@
         <label for="name">Имя / компания</label>
         <input id="name" name="name" required {% if not invite_required %}autofocus{% endif %}>
         <label for="email">Email</label>
-        <input id="email" name="email" type="email" required>
+        <input id="email" name="email" type="email" required
+               {% if allowed_domains %}placeholder="имя@{{ allowed_domains[0] }}"
+               title="Только рабочая почта: {% for d in allowed_domains %}@{{ d }}{% if not loop.last %}, {% endif %}{% endfor %}"{% endif %}>
+        {% if allowed_domains %}
+        <p class="muted" style="margin:6px 0 0;font-size:12.5px;">
+          Регистрация только с рабочей почтой
+          {% for d in allowed_domains %}<b>@{{ d }}</b>{% if not loop.last %}, {% endif %}{% endfor %}.
+        </p>
+        {% endif %}
         <label for="password">Пароль</label>
-        <input id="password" name="password" type="password" required minlength="6">
+        <input id="password" name="password" type="password" required minlength="8">
         <button type="submit" style="width: 100%; margin-top: 1.25rem;">Создать аккаунт</button>
       </form>
       <p class="muted" style="margin-top:1.25rem;text-align:center;">Уже есть аккаунт? <a href="/login">Войти</a></p>

@@ -33,6 +33,23 @@
     <div class="card" style="margin-bottom:0;">
       <h3 style="font-size:15px;margin-bottom:4px;">Потолок расхода</h3>
       <p class="muted" style="margin-top:0;">Действует во всех трёх дверях сразу: API, веб-чат, Telegram. Пусто — без потолка.</p>
+      <form method="post" action="/admin/customers/{{ target.id }}/card"
+            style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:12px;align-items:end;margin-bottom:22px;">
+        <div>
+          <label>ФИО</label>
+          <input name="name" value="{{ target.name }}" required>
+        </div>
+        <div>
+          <label>Должность</label>
+          <input name="job_title" value="{{ target.job_title or '' }}" placeholder="например, бэкенд-разработчик">
+        </div>
+        <div>
+          <label>Подразделение</label>
+          <input name="department" value="{{ target.department or '' }}" placeholder="например, разработка">
+        </div>
+        <button type="submit" class="secondary" style="height:38px;">Сохранить</button>
+      </form>
+
       <form method="post" action="/admin/customers/{{ target.id }}/limits">
         <label for="daily_limit_rub">В день, ₽</label>
         <input id="daily_limit_rub" name="daily_limit_rub" type="number" step="0.01" min="0"
