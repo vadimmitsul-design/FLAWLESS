@@ -419,6 +419,20 @@
   .theme-toggle{position:fixed;top:16px;right:16px;z-index:50;width:40px;height:40px;padding:0;border-radius:50%;background:var(--surface);border:1px solid var(--border);color:var(--text);font-size:17px;display:flex;align-items:center;justify-content:center;}
   /* В шапке кнопка встаёт в поток: плавающая наезжала на «Выйти». */
   .theme-toggle.in-bar{position:static;width:38px;height:38px;font-size:16px;flex:0 0 auto;}
+
+  /* На узком телефоне (~390px) логотипу с бейджем контура и правому блоку
+     (админка/тема/аватар/выйти) физически негде поместиться в одну
+     строку — не хватает почти на треть ширины экрана. min-width:0 на
+     .cab-left решал это сжатием контейнера НИЖЕ содержимого, а не самого
+     содержимого: логотип не резиновый, он просто вылезал из своего
+     контейнера и ложился поверх правого блока (найдено 2026-09-21).
+     Правильный ответ — не сжатие, а перенос: когда в одну строку не
+     помещается, правый блок уходит на вторую, а не наезжает на первую. */
+  @media (max-width:600px){
+    .cab-row{height:auto;min-height:66px;flex-wrap:wrap;row-gap:8px;padding:10px 0;}
+    .cab-left,.cab-right{flex:1 1 100%;}
+    .cab-right{justify-content:flex-end;}
+  }
 </style>
 {% block head %}{% endblock %}
 </head>
