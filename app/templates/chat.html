@@ -1,108 +1,405 @@
 {% extends "base.html" %}
 {% block title %}Чат — Flawless{% endblock %}
-{% block content %}
-<div class="wrap" style="padding:32px 32px 0;">
-<div style="display:grid;grid-template-columns:260px 1fr;gap:20px;height:calc(100vh - 132px);">
 
-  <div class="card" style="margin-bottom:0;padding:16px;display:flex;flex-direction:column;overflow:hidden;">
-    <a href="/chat" style="display:block;text-align:center;height:38px;line-height:38px;border-radius:8px;background:var(--accent);color:var(--btn-on-accent);font-weight:700;font-size:13.5px;margin-bottom:14px;">+ Новый диалог</a>
-    <div style="overflow-y:auto;flex:1;">
+{% block head %}
+<style>
+  .chat-wrap{padding:28px 32px 0;}
+  .chat-grid{display:grid;grid-template-columns:260px 1fr;gap:20px;height:calc(100vh - 128px);}
+  @media (max-width:760px){.chat-grid{grid-template-columns:1fr;height:auto;}
+    .chat-side{display:none;}}
+
+  /* ─── список диалогов ─── */
+  .chat-side{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    padding:14px;display:flex;flex-direction:column;overflow:hidden;}
+  .chat-new{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;
+    border-radius:10px;background:var(--accent);color:var(--btn-on-accent);font-weight:700;
+    font-size:13.5px;margin-bottom:12px;flex-shrink:0;transition:background .15s ease;}
+  .chat-new:hover{background:var(--accent-hi);}
+  .chat-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:2px;}
+  .chat-item{display:block;padding:10px 11px;border-radius:9px;}
+  .chat-item:hover{background:var(--surface-hi);}
+  .chat-item.is-active{background:var(--accent-wash);}
+  .chat-item-title{font-size:13.5px;color:var(--text);font-weight:600;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis;}
+  .chat-item-model{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text-faint);margin-top:2px;}
+  .chat-empty-list{font-size:13px;color:var(--text-faint);padding:8px 4px;}
+
+  /* ─── панель диалога ─── */
+  .chat-panel{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+    display:flex;flex-direction:column;overflow:hidden;}
+  .chat-topbar{padding:13px 20px;border-bottom:1px solid var(--border);display:flex;
+    align-items:center;justify-content:space-between;gap:14px;}
+  .chat-model-select{position:relative;display:inline-flex;align-items:center;}
+  .chat-model-select select{appearance:none;-webkit-appearance:none;width:auto;height:34px;
+    padding:0 30px 0 12px;font-size:13px;font-weight:600;font-family:'JetBrains Mono',monospace;
+    border:1px solid var(--border);border-radius:9px;background:var(--surface-hi);color:var(--text);
+    cursor:pointer;}
+  .chat-model-select::after{content:"";position:absolute;right:11px;top:50%;width:7px;height:7px;
+    border-right:1.5px solid var(--text-faint);border-bottom:1.5px solid var(--text-faint);
+    transform:translateY(-65%) rotate(45deg);pointer-events:none;}
+  .chat-balance{font-size:12.5px;color:var(--text-faint);white-space:nowrap;}
+  .chat-balance b{font-family:'JetBrains Mono',monospace;color:var(--text-dim);font-weight:600;}
+
+  /* ─── лог сообщений ─── */
+  .chat-log{flex:1;overflow-y:auto;padding:26px 8% 12px;display:flex;flex-direction:column;gap:22px;}
+  @media (max-width:900px){.chat-log{padding:22px 20px 12px;}}
+  .msg{max-width:100%;}
+  .msg-row{display:flex;}
+  .msg-row.from-user{justify-content:flex-end;}
+  .msg-row.from-assistant{justify-content:flex-start;}
+
+  .msg-user{max-width:74%;background:var(--accent);color:var(--btn-on-accent);border-radius:16px 16px 4px 16px;
+    padding:11px 15px;font-size:14.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;}
+
+  /* Ответ модели — не коробка-«пузырь», а обычный текст, как у собеседника,
+     а не как у формы обратной связи: премиальные чат-интерфейсы (Grok,
+     ChatGPT) держат ответ на всю ширину колонки, без заливки и рамки —
+     внимание достаётся тексту, а не декорации вокруг него. */
+  .msg-assistant{max-width:82ch;color:var(--text);font-size:15px;line-height:1.68;}
+  .msg-assistant.is-thinking{color:var(--text-faint);}
+  .msg-attach{margin-top:6px;font-size:11.5px;color:var(--text-faint);display:flex;align-items:center;gap:5px;}
+  .msg-attach svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.8;}
+
+  /* ── типографика внутри ответа (наш мини-markdown, .md-render) ── */
+  .md-render p{margin:0 0 .85em;}
+  .md-render p:last-child{margin-bottom:0;}
+  .md-render strong{color:var(--text);font-weight:700;}
+  .md-render em{font-style:italic;}
+  .md-render ul,.md-render ol{margin:.15em 0 .9em;padding-left:1.35em;}
+  .md-render li{margin-bottom:.32em;}
+  .md-render li:last-child{margin-bottom:0;}
+  .md-render a{color:var(--accent-hi);text-decoration:underline;text-underline-offset:2px;}
+  .md-render .md-h{display:block;font-weight:700;color:var(--text);margin:.9em 0 .35em;font-size:1.04em;}
+  .md-render .md-h:first-child{margin-top:0;}
+  .md-render code{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:.89em;
+    background:var(--surface-hi);border:1px solid var(--border);border-radius:5px;
+    padding:0.14em 0.42em;word-break:break-word;}
+  .md-render .dx-code{background:var(--code-bg);border:1px solid var(--code-border);
+    border-radius:11px;overflow:hidden;margin:.5em 0 .9em;}
+  .md-render .dx-code-head{display:flex;align-items:center;justify-content:space-between;
+    padding:8px 12px;border-bottom:1px solid var(--code-border);}
+  .md-render .dx-code-label{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.05em;
+    text-transform:uppercase;color:color-mix(in oklab, var(--code-text) 55%, transparent);}
+  .md-render .dx-code pre{margin:0;padding:14px;font-family:'JetBrains Mono',ui-monospace,monospace;
+    font-size:12.8px;line-height:1.62;color:var(--code-text);overflow-x:auto;}
+  .md-render .dx-code code{background:none;border:none;padding:0;color:inherit;font-size:1em;}
+  .md-render .dx-copy{appearance:none;border:1px solid var(--code-border);background:transparent;
+    width:auto;height:24px;padding:0 9px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;
+    color:color-mix(in oklab, var(--code-text) 70%, transparent);font-family:'Manrope';}
+  .md-render .dx-copy:hover{color:var(--code-text);}
+  .md-render .dx-copy[data-copied]{background:color-mix(in oklab, var(--code-text) 12%, transparent);
+    color:var(--code-text);border-color:transparent;}
+
+  /* ── индикатор «печатает»: три точки, как в живом собеседнике ── */
+  .think-dots{display:inline-flex;gap:4px;align-items:center;height:15px;}
+  .think-dots span{width:5px;height:5px;border-radius:50%;background:var(--text-faint);}
+  @media (prefers-reduced-motion:no-preference){
+    .think-dots span{animation:think-pulse 1.3s ease-in-out infinite;}
+    .think-dots span:nth-child(2){animation-delay:.16s;}
+    .think-dots span:nth-child(3){animation-delay:.32s;}
+    @keyframes think-pulse{0%,80%,100%{opacity:.3;transform:scale(.85);}40%{opacity:1;transform:scale(1);}}
+  }
+
+  /* Появление новой реплики — тем же приёмом, что и у витрины: видимое
+     состояние по умолчанию, анимация — только поверх него. */
+  @media (prefers-reduced-motion:no-preference){
+    .msg-row.is-new{animation:msg-in .28s cubic-bezier(.22,.61,.36,1);}
+    @keyframes msg-in{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+  }
+
+  .chat-empty-state{margin:auto;text-align:center;max-width:46ch;color:var(--text-dim);}
+  .chat-empty-state b{display:block;color:var(--text);font-size:16.5px;margin-bottom:9px;}
+  .chat-empty-state p{margin:0;font-size:14px;line-height:1.65;}
+
+  /* ─── файл, выбранный к отправке — снимаемый «чип», не голая строка ─── */
+  .chat-file-chip{display:none;align-items:center;gap:7px;align-self:flex-start;margin:0 0 8px;
+    padding:6px 8px 6px 10px;border-radius:99px;background:var(--surface-hi);
+    border:1px solid var(--border);font-size:12.5px;color:var(--text-dim);max-width:100%;}
+  .chat-file-chip svg{width:13px;height:13px;stroke:var(--text-faint);fill:none;stroke-width:1.8;flex-shrink:0;}
+  .chat-file-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .chat-file-chip button{width:18px;height:18px;padding:0;border-radius:50%;background:var(--border);
+    color:var(--text-dim);font-size:12px;line-height:1;flex-shrink:0;display:flex;
+    align-items:center;justify-content:center;}
+  .chat-file-chip button:hover{background:var(--bad);color:#fff;}
+
+  /* ─── строка ввода ─── */
+  .chat-input-bar{padding:14px 20px 18px;border-top:1px solid var(--border);}
+  .chat-input-row{display:flex;gap:10px;align-items:flex-end;}
+  .chat-input-shell{flex:1;display:flex;align-items:flex-end;gap:8px;border:1px solid var(--border);
+    border-radius:16px;background:var(--surface-hi);padding:8px 8px 8px 14px;transition:border-color .15s ease;}
+  .chat-input-shell:focus-within{border-color:var(--accent);}
+  #chat-input{flex:1;height:24px;max-height:160px;resize:none;overflow-y:auto;border:none;
+    background:transparent;padding:4px 0;font-size:14.5px;line-height:1.5;}
+  #chat-input:focus{border-color:transparent;}
+
+  .icon-btn{width:38px;height:38px;padding:0;border-radius:11px;background:transparent;
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;color:var(--text-dim);}
+  .icon-btn:hover{border-color:var(--brand);color:var(--text);}
+  .icon-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;
+    stroke-linecap:round;stroke-linejoin:round;display:block;}
+
+  .send-btn{width:38px;height:38px;padding:0;border-radius:11px;flex-shrink:0;
+    background:var(--accent);display:flex;align-items:center;justify-content:center;
+    transition:background .15s ease, opacity .15s ease;}
+  .send-btn:hover{background:var(--accent-hi);}
+  .send-btn:disabled{opacity:.5;}
+  .send-btn svg{width:18px;height:18px;stroke:var(--btn-on-accent);fill:none;stroke-width:2;
+    stroke-linecap:round;stroke-linejoin:round;}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wrap chat-wrap">
+<div class="chat-grid">
+
+  <div class="chat-side">
+    <a href="/chat" class="chat-new">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      Новый диалог
+    </a>
+    <div class="chat-list">
       {% for c in conversations %}
-      <a href="/chat/{{ c.id }}" style="display:block;padding:10px 10px;border-radius:8px;margin-bottom:4px;{% if active_conversation and active_conversation.id == c.id %}background:var(--surface-hi);{% endif %}">
-        <div style="font-size:13.5px;color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ c.title or "Новый диалог" }}</div>
-        <div class="mono muted" style="font-size:11.5px;margin-top:2px;">{{ c.model_alias }}</div>
+      <a href="/chat/{{ c.id }}" class="chat-item{% if active_conversation and active_conversation.id == c.id %} is-active{% endif %}">
+        <div class="chat-item-title">{{ c.title or "Новый диалог" }}</div>
+        <div class="chat-item-model">{{ c.model_alias }}</div>
       </a>
       {% else %}
-      <p class="muted" style="font-size:13px;">Диалогов пока нет.</p>
+      <p class="chat-empty-list">Диалогов пока нет.</p>
       {% endfor %}
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:0;padding:0;display:flex;flex-direction:column;overflow:hidden;">
-    <div style="padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
-      <select id="chat-model" style="width:220px;height:36px;font-size:13.5px;">
-        {% for m in models %}
-        <option value="{{ m }}" {% if active_conversation and active_conversation.model_alias == m %}selected{% endif %}>{{ m }}</option>
-        {% endfor %}
-      </select>
-      <span class="muted" style="font-size:13px;">Баланс: {{ "%.2f"|format(customer.balance_rub) }} ₽</span>
+  <div class="chat-panel">
+    <div class="chat-topbar">
+      <div class="chat-model-select">
+        <select id="chat-model">
+          {% for m in models %}
+          <option value="{{ m }}" {% if active_conversation and active_conversation.model_alias == m %}selected{% endif %}>{{ m }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="chat-balance">Баланс <b>{{ "%.2f"|format(customer.balance_rub) }} ₽</b></div>
     </div>
 
-    <div id="chat-log" style="flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:14px;">
+    <div id="chat-log" class="chat-log">
       {% for m in chat_messages %}
-      <div style="max-width:78%;align-self:{{ 'flex-end' if m.role == 'user' else 'flex-start' }};">
-        <div style="background:{{ 'var(--accent)' if m.role == 'user' else 'var(--surface-hi)' }};color:{{ 'var(--btn-on-accent)' if m.role == 'user' else 'var(--text)' }};border-radius:12px;padding:10px 14px;font-size:14.5px;line-height:1.5;white-space:pre-wrap;">{{ m.text }}</div>
-        {% if m.attachment_name %}<div class="muted" style="font-size:11.5px;margin-top:4px;">📎 {{ m.attachment_name }}</div>{% endif %}
+      <div class="msg-row from-{{ m.role }}">
+        <div class="msg">
+          {% if m.role == 'user' %}
+          <div class="msg-user">{{ m.text }}</div>
+          {% else %}
+          <div class="msg-assistant md-render" data-raw="{{ m.text }}"></div>
+          {% endif %}
+          {% if m.attachment_name %}
+          <div class="msg-attach">
+            <svg viewBox="0 0 24 24"><path d="M16.5 7.5v8.25a4.5 4.5 0 0 1-9 0V6a3 3 0 0 1 6 0v8.25a1.5 1.5 0 0 1-3 0V7.5"/></svg>
+            {{ m.attachment_name }}
+          </div>
+          {% endif %}
+        </div>
       </div>
       {% else %}
-      <div class="muted" style="text-align:center;margin:48px auto 0;max-width:44ch;line-height:1.65;">
-        <div style="font-weight:700;color:var(--text);font-size:15.5px;margin-bottom:8px;">Спросите что-нибудь</div>
-        Модель выбирается сверху, ответ списывается с вашего баланса по факту
-        использованных токенов — сумма видна в истории вызовов в кабинете.
-        Можно приложить картинку или текстовый файл.
+      <div class="chat-empty-state">
+        <b>Спросите что-нибудь</b>
+        <p>
+          Модель выбирается сверху, ответ списывается с вашего баланса по факту
+          использованных токенов — сумма видна в истории вызовов в кабинете.
+          Можно приложить картинку или текстовый файл.
+        </p>
       </div>
       {% endfor %}
     </div>
 
-    <form id="chat-form" style="padding:16px 20px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:flex-end;">
-      <div style="flex:1;">
-        <textarea id="chat-input" rows="1" placeholder="Спросите что-нибудь…" style="height:44px;resize:none;"></textarea>
-        <div id="chat-file-name" class="muted" style="font-size:12px;margin-top:4px;display:none;"></div>
+    <div class="chat-input-bar">
+      <div class="chat-file-chip" id="chat-file-chip">
+        <svg viewBox="0 0 24 24"><path d="M16.5 7.5v8.25a4.5 4.5 0 0 1-9 0V6a3 3 0 0 1 6 0v8.25a1.5 1.5 0 0 1-3 0V7.5"/></svg>
+        <span id="chat-file-name"></span>
+        <button type="button" id="chat-file-clear" aria-label="Убрать файл">✕</button>
       </div>
-      <label style="height:44px;width:44px;margin:0;border-radius:8px;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;font-size:18px;font-weight:400;color:inherit;">
-        📎<input id="chat-file" type="file" accept="image/*,.txt,.md,.csv,.json,.log" style="display:none;">
-      </label>
-      <button type="submit" id="chat-send" style="flex-shrink:0;">Отправить</button>
-    </form>
+      <form id="chat-form" class="chat-input-row">
+        <label class="icon-btn" title="Прикрепить файл">
+          <svg viewBox="0 0 24 24"><path d="M16.5 7.5v8.25a4.5 4.5 0 0 1-9 0V6a3 3 0 0 1 6 0v8.25a1.5 1.5 0 0 1-3 0V7.5"/></svg>
+          <input id="chat-file" type="file" accept="image/*,.txt,.md,.csv,.json,.log" style="display:none;">
+        </label>
+        <div class="chat-input-shell">
+          <textarea id="chat-input" rows="1" placeholder="Спросите что-нибудь…"></textarea>
+        </div>
+        <button type="submit" id="chat-send" class="send-btn" aria-label="Отправить">
+          <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </button>
+      </form>
+    </div>
   </div>
 </div>
 </div>
 
 <script>
 (function(){
+  // ── мини-markdown для ответа модели ──────────────────────────────────
+  // Полного CommonMark не строим — покрываем то, что реально пишут модели:
+  // жирный/курсив, инлайн-код и блоки кода, списки, ссылки, абзацы.
+  // ЭКРАНИРОВАНИЕ — первым шагом, до любой разметки: ответ модели это ЧУЖОЙ
+  // текст, и вставлять его как innerHTML без экранирования значило бы дать
+  // любому, кто продиктует модели HTML/скрипт в ответе, исполнить его в
+  // чужом браузере (см. app/dlp.py — тот же принцип «не доверять контенту»,
+  // только на другом конце запроса).
+  function escapeHtml(s){
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function renderMarkdown(raw){
+    if (!raw) return '';
+    var blocks = [];
+    // Блоки кода вынимаются ДО экранирования остального текста — иначе
+    // экранирование самих блоков произошло бы дважды при возврате на место.
+    var text = String(raw).replace(/```(\w*)\n?([\s\S]*?)```/g, function(_, lang, code){
+      blocks.push({lang: lang || '', code: code.replace(/\n$/, '')});
+      return '\u0000CB' + (blocks.length - 1) + '\u0000';
+    });
+    text = escapeHtml(text);
+    text = text.replace(/`([^`\n]+)`/g, function(_, c){ return '<code>' + c + '</code>'; });
+    text = text.replace(/\*\*([^\n*]+)\*\*/g, '<strong>$1</strong>');
+    text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+    text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+    var lines = text.split('\n');
+    var html = '';
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (/^\u0000CB\d+\u0000$/.test(line.trim())) { html += line.trim(); i++; continue; }
+      if (line.trim() === '') { i++; continue; }
+      var heading = line.match(/^#{1,4}\s+(.*)$/);
+      if (heading) { html += '<span class="md-h">' + heading[1] + '</span>'; i++; continue; }
+      if (/^\s*[-*]\s+/.test(line)) {
+        var uitems = [];
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          uitems.push('<li>' + lines[i].replace(/^\s*[-*]\s+/, '') + '</li>'); i++;
+        }
+        html += '<ul>' + uitems.join('') + '</ul>';
+        continue;
+      }
+      if (/^\s*\d+[.)]\s+/.test(line)) {
+        var oitems = [];
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+          oitems.push('<li>' + lines[i].replace(/^\s*\d+[.)]\s+/, '') + '</li>'); i++;
+        }
+        html += '<ol>' + oitems.join('') + '</ol>';
+        continue;
+      }
+      var para = [line]; i++;
+      while (i < lines.length && lines[i].trim() !== ''
+             && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+[.)]\s+/.test(lines[i])
+             && lines[i].indexOf('\u0000CB') === -1 && !/^#{1,4}\s+/.test(lines[i])) {
+        para.push(lines[i]); i++;
+      }
+      html += '<p>' + para.join('<br>') + '</p>';
+    }
+
+    return html.replace(/\u0000CB(\d+)\u0000/g, function(_, idx){
+      var b = blocks[idx];
+      return '<div class="dx-code"><div class="dx-code-head"><span class="dx-code-label">' +
+        escapeHtml(b.lang || 'code') + '</span><button type="button" class="dx-copy">Копировать</button></div>' +
+        '<pre><code>' + escapeHtml(b.code) + '</code></pre></div>';
+    });
+  }
+
+  // Копирование из блока кода — делегирование, работает и для блоков,
+  // добавленных уже после загрузки страницы (новые ответы в диалоге).
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest && e.target.closest('.dx-copy');
+    if (!btn) return;
+    var pre = btn.closest('.dx-code').querySelector('pre');
+    navigator.clipboard.writeText(pre.innerText).then(function(){
+      btn.textContent = 'Скопировано';
+      btn.setAttribute('data-copied', '1');
+      setTimeout(function(){ btn.textContent = 'Копировать'; btn.removeAttribute('data-copied'); }, 1400);
+    }).catch(function(){});
+  });
+
+  // История диалога рисуется сервером как ЭКРАНИРОВАННЫЙ текст в атрибуте
+  // data-raw (Jinja сам экранирует значения атрибутов) — тем же рендерером,
+  // что и свежие ответы, чтобы старые и новые сообщения выглядели одинаково.
+  document.querySelectorAll('.msg-assistant[data-raw]').forEach(function(el){
+    el.innerHTML = renderMarkdown(el.getAttribute('data-raw'));
+  });
+
   var conversationId = {{ active_conversation.id if active_conversation else "null" }};
   var log = document.getElementById('chat-log');
+  var emptyState = log.querySelector('.chat-empty-state');
   var form = document.getElementById('chat-form');
   var input = document.getElementById('chat-input');
   var fileInput = document.getElementById('chat-file');
+  var fileChip = document.getElementById('chat-file-chip');
   var fileNameLabel = document.getElementById('chat-file-name');
+  var fileClearBtn = document.getElementById('chat-file-clear');
   var sendBtn = document.getElementById('chat-send');
   var modelSelect = document.getElementById('chat-model');
 
+  function clearFile(){
+    fileInput.value = '';
+    fileChip.style.display = 'none';
+  }
   fileInput.addEventListener('change', function(){
     if (fileInput.files.length) {
-      fileNameLabel.textContent = '📎 ' + fileInput.files[0].name;
-      fileNameLabel.style.display = 'block';
+      fileNameLabel.textContent = fileInput.files[0].name;
+      fileChip.style.display = 'inline-flex';
     } else {
-      fileNameLabel.style.display = 'none';
+      fileChip.style.display = 'none';
     }
   });
+  fileClearBtn.addEventListener('click', clearFile);
 
-  function addBubble(role, text, attachmentName){
-    var wrap = document.createElement('div');
-    wrap.style.maxWidth = '78%';
-    wrap.style.alignSelf = role === 'user' ? 'flex-end' : 'flex-start';
+  // Поле растёт вместе с текстом — до потолка в CSS (max-height), дальше
+  // прокрутка внутри самого поля, а не всей страницы.
+  function autoGrow(){
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  }
+  input.addEventListener('input', autoGrow);
+
+  function addRow(role, contentEl){
+    if (emptyState) { emptyState.remove(); emptyState = null; }
+    var row = document.createElement('div');
+    row.className = 'msg-row from-' + role + ' is-new';
+    var msg = document.createElement('div');
+    msg.className = 'msg';
+    msg.appendChild(contentEl);
+    row.appendChild(msg);
+    log.appendChild(row);
+    log.scrollTop = log.scrollHeight;
+    return row;
+  }
+
+  function addUserBubble(text, attachmentName){
+    var holder = document.createElement('div');
     var bubble = document.createElement('div');
-    bubble.style.background = role === 'user' ? 'var(--accent)' : 'var(--surface-hi)';
-    bubble.style.color = role === 'user' ? 'var(--btn-on-accent)' : 'var(--text)';
-    bubble.style.borderRadius = '12px';
-    bubble.style.padding = '10px 14px';
-    bubble.style.fontSize = '14.5px';
-    bubble.style.lineHeight = '1.5';
-    bubble.style.whiteSpace = 'pre-wrap';
+    bubble.className = 'msg-user';
     bubble.textContent = text;
-    wrap.appendChild(bubble);
+    holder.appendChild(bubble);
     if (attachmentName) {
       var att = document.createElement('div');
-      att.className = 'muted';
-      att.style.fontSize = '11.5px';
-      att.style.marginTop = '4px';
-      att.textContent = '📎 ' + attachmentName;
-      wrap.appendChild(att);
+      att.className = 'msg-attach';
+      att.innerHTML = '<svg viewBox="0 0 24 24"><path d="M16.5 7.5v8.25a4.5 4.5 0 0 1-9 0V6a3 3 0 0 1 6 0v8.25a1.5 1.5 0 0 1-3 0V7.5"/></svg>';
+      att.appendChild(document.createTextNode(attachmentName));
+      holder.appendChild(att);
     }
-    log.appendChild(wrap);
+    return addRow('user', holder);
+  }
+
+  function addThinkingBubble(){
+    var el = document.createElement('div');
+    el.className = 'msg-assistant is-thinking';
+    el.innerHTML = '<span class="think-dots"><span></span><span></span><span></span></span>';
+    return addRow('assistant', el);
+  }
+
+  function fillAssistantBubble(row, text){
+    var el = row.querySelector('.msg-assistant');
+    el.classList.remove('is-thinking');
+    el.innerHTML = renderMarkdown(text);
     log.scrollTop = log.scrollHeight;
-    return wrap;
   }
 
   form.addEventListener('submit', function(e){
@@ -118,11 +415,11 @@
     if (!text && !file) return;
 
     sendBtn.disabled = true;
-    sendBtn.textContent = 'Думаю…';
-    addBubble('user', text || '(файл без текста)', file ? file.name : null);
+    addUserBubble(text || '(файл без текста)', file ? file.name : null);
+    var thinkingRow = addThinkingBubble();
     input.value = '';
-    fileInput.value = '';
-    fileNameLabel.style.display = 'none';
+    autoGrow();
+    clearFile();
 
     var fd = new FormData();
     if (conversationId) fd.append('conversation_id', conversationId);
@@ -140,14 +437,13 @@
           window.location.href = '/chat/' + data.conversation_id;
           return;
         }
-        addBubble('assistant', data.reply, null);
+        fillAssistantBubble(thinkingRow, data.reply);
       })
       .catch(function(err){
-        addBubble('assistant', 'Не получилось: ' + err.message, null);
+        fillAssistantBubble(thinkingRow, 'Не получилось: ' + err.message);
       })
       .finally(function(){
         sendBtn.disabled = false;
-        sendBtn.textContent = 'Отправить';
       });
   });
 
