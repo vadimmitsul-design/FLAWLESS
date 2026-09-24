@@ -13,9 +13,8 @@
 
 import pytest
 
-from app.config import settings
-from app.main import _DOCS_PAGES
-
+from app.core.config import settings
+from app.core.pages import DOCS_PAGES
 
 # ---------- лендинг ----------
 
@@ -68,7 +67,7 @@ def test_docs_index_is_public(client):
     assert "Быстрый старт" in r.text
 
 
-@pytest.mark.parametrize("path", [page[1] for page in _DOCS_PAGES])
+@pytest.mark.parametrize("path", [page[1] for page in DOCS_PAGES])
 def test_every_documented_page_renders(client, path):
     r = client.get(path)
     assert r.status_code == 200, f"{path} не отрендерилась"
@@ -83,7 +82,7 @@ def test_sidebar_lists_every_page(client):
     """Меню собирается из того же списка, что и маршруты, — проверяем, что
     ни одна страница не потерялась по дороге."""
     html = client.get("/docs").text
-    for _group, path, title, _template, _lead in _DOCS_PAGES:
+    for _group, path, title, _template, _lead in DOCS_PAGES:
         assert f'href="{path}"' in html, f"{path} нет в боковом меню"
         assert title in html
 
@@ -99,7 +98,7 @@ def test_paging_links_neighbours(client):
     assert 'href="/docs/auth"' in first
     assert "Назад" not in first
 
-    last = client.get(_DOCS_PAGES[-1][1]).text
+    last = client.get(DOCS_PAGES[-1][1]).text
     assert "Назад" in last
     assert "Дальше" not in last
 

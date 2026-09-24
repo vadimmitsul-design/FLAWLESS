@@ -15,9 +15,9 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.config import settings
+from app.core.config import settings
 from app.db import SessionLocal
-from app.models import Customer, Product, Prompt
+from app.db.models import Customer, Product, Prompt
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -32,6 +32,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -218,9 +219,9 @@ def test_instance_name_is_shown_in_the_header(client, monkeypatch):
 def test_templates_cannot_reach_secrets_through_the_flags_object():
     """В шаблоны отдаётся только набор флагов, а не весь конфиг — иначе
     разметка могла бы отрендерить session_secret или ключи провайдеров."""
-    from app.main import templates
+    from app.main import app
 
-    flags = templates.env.globals["features"]
+    flags = app.state.templates.env.globals["features"]
     assert not hasattr(flags, "session_secret")
     assert not hasattr(flags, "database_url")
     assert flags.enable_shop == settings.enable_shop

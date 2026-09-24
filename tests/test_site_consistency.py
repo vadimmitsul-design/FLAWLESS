@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Витрина как один сайт: одна шапка и тема, которая не меняется сама.
 
 Заказчик поймал это глазами: переход с лендинга в документацию терял половину
@@ -10,13 +9,13 @@
 
 import pytest
 
-from app.config import settings
-from app.main import _MARKETING_PAGES
+from app.core.config import settings
+from app.core.pages import MARKETING_PAGES
 
 # Все пункты меню витрины. Пропажа любого — это и есть тот баг.
 MENU = ["/models", "/pricing", "/product/api", "/product/chat", "/solutions/developers", "/docs"]
 
-PUBLIC_PAGES = ["/", "/docs", "/docs/billing"] + [p[0] for p in _MARKETING_PAGES]
+PUBLIC_PAGES = ["/", "/docs", "/docs/billing"] + [p[0] for p in MARKETING_PAGES]
 
 
 def _signup(client, email, name="Site Tester", password="TestPass123"):

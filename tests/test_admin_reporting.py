@@ -5,13 +5,13 @@ created_at и суммой — биллинг сам по себе покрыт 
 Хелперы продублированы намеренно (см. test_features_wave2.py)."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import Customer, UsageEvent
+from app.db.models import Customer, UsageEvent
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -26,6 +26,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -36,6 +37,7 @@ def _admin_client():
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)
@@ -75,9 +77,9 @@ def _make_event(payer_id, model, charged_rub, created_at, actor_id=None, cost_us
     asyncio.run(_create())
 
 
-MARCH = datetime(2026, 3, 15, 12, 0, tzinfo=timezone.utc)
-MARCH_OTHER_DAY = datetime(2026, 3, 17, 9, 0, tzinfo=timezone.utc)
-APRIL = datetime(2026, 4, 2, 12, 0, tzinfo=timezone.utc)
+MARCH = datetime(2026, 3, 15, 12, 0, tzinfo=UTC)
+MARCH_OTHER_DAY = datetime(2026, 3, 17, 9, 0, tzinfo=UTC)
+APRIL = datetime(2026, 4, 2, 12, 0, tzinfo=UTC)
 
 
 def _csv_row(admin, month, email):
@@ -127,8 +129,8 @@ def test_monthly_total_across_everyone(client):
     _signup(second, "rep3b@test.local")
     a = _customer("rep3a@test.local")
     b = _customer("rep3b@test.local")
-    _make_event(a.id, "gpt-5-mini", "100.0000", datetime(2026, 5, 4, 10, 0, tzinfo=timezone.utc))
-    _make_event(b.id, "claude-sonnet", "250.0000", datetime(2026, 5, 6, 10, 0, tzinfo=timezone.utc))
+    _make_event(a.id, "gpt-5-mini", "100.0000", datetime(2026, 5, 4, 10, 0, tzinfo=UTC))
+    _make_event(b.id, "claude-sonnet", "250.0000", datetime(2026, 5, 6, 10, 0, tzinfo=UTC))
 
     admin = _admin_client()
     page = admin.get("/admin/customers?month=2026-05")
@@ -145,7 +147,9 @@ def test_child_spend_lands_on_the_parent_wallet(client):
         follow_redirects=True,
     )
     kid = _customer("repkid@test.local")
-    _make_event(parent.id, "gpt-5-mini", "33.0000", datetime(2026, 6, 3, 10, 0, tzinfo=timezone.utc), actor_id=kid.id)
+    _make_event(
+        parent.id, "gpt-5-mini", "33.0000", datetime(2026, 6, 3, 10, 0, tzinfo=UTC), actor_id=kid.id
+    )
 
     admin = _admin_client()
     page = admin.get(f"/admin/customers/{parent.id}?month=2026-06")
@@ -164,8 +168,8 @@ def test_invalid_month_is_rejected(client):
 def test_detail_breaks_spend_down_by_model(client):
     _signup(client, "rep4@test.local")
     target = _customer("rep4@test.local")
-    _make_event(target.id, "gpt-5-mini", "10.0000", datetime(2026, 7, 2, 10, 0, tzinfo=timezone.utc))
-    _make_event(target.id, "claude-sonnet", "30.0000", datetime(2026, 7, 3, 10, 0, tzinfo=timezone.utc))
+    _make_event(target.id, "gpt-5-mini", "10.0000", datetime(2026, 7, 2, 10, 0, tzinfo=UTC))
+    _make_event(target.id, "claude-sonnet", "30.0000", datetime(2026, 7, 3, 10, 0, tzinfo=UTC))
 
     admin = _admin_client()
     page = admin.get(f"/admin/customers/{target.id}?month=2026-07")
@@ -180,9 +184,9 @@ def test_detail_breaks_spend_down_by_model(client):
 def test_detail_breaks_spend_down_by_day(client):
     _signup(client, "rep5@test.local")
     target = _customer("rep5@test.local")
-    _make_event(target.id, "gpt-5-mini", "5.0000", datetime(2026, 8, 4, 8, 0, tzinfo=timezone.utc))
-    _make_event(target.id, "gpt-5-mini", "6.0000", datetime(2026, 8, 4, 20, 0, tzinfo=timezone.utc))
-    _make_event(target.id, "gpt-5-mini", "7.0000", datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc))
+    _make_event(target.id, "gpt-5-mini", "5.0000", datetime(2026, 8, 4, 8, 0, tzinfo=UTC))
+    _make_event(target.id, "gpt-5-mini", "6.0000", datetime(2026, 8, 4, 20, 0, tzinfo=UTC))
+    _make_event(target.id, "gpt-5-mini", "7.0000", datetime(2026, 8, 9, 12, 0, tzinfo=UTC))
 
     admin = _admin_client()
     page = admin.get(f"/admin/customers/{target.id}?month=2026-08")
@@ -194,8 +198,8 @@ def test_detail_breaks_spend_down_by_day(client):
 def test_detail_shows_lifetime_total_alongside_the_period(client):
     _signup(client, "rep6@test.local")
     target = _customer("rep6@test.local")
-    _make_event(target.id, "gpt-5-mini", "15.0000", datetime(2026, 9, 1, 10, 0, tzinfo=timezone.utc))
-    _make_event(target.id, "gpt-5-mini", "85.0000", datetime(2026, 10, 1, 10, 0, tzinfo=timezone.utc))
+    _make_event(target.id, "gpt-5-mini", "15.0000", datetime(2026, 9, 1, 10, 0, tzinfo=UTC))
+    _make_event(target.id, "gpt-5-mini", "85.0000", datetime(2026, 10, 1, 10, 0, tzinfo=UTC))
 
     admin = _admin_client()
     page = admin.get(f"/admin/customers/{target.id}?month=2026-09")
@@ -209,7 +213,7 @@ def test_detail_shows_lifetime_total_alongside_the_period(client):
 def test_csv_export_contains_the_period_numbers(client):
     _signup(client, "rep7@test.local", name="Пётр Выгрузкин")
     target = _customer("rep7@test.local")
-    _make_event(target.id, "gpt-5-mini", "123.4500", datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc))
+    _make_event(target.id, "gpt-5-mini", "123.4500", datetime(2026, 11, 5, 10, 0, tzinfo=UTC))
 
     admin = _admin_client()
     r = admin.get("/admin/customers.csv?month=2026-11")

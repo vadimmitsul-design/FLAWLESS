@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Сменить пароль администратора на случайный, не показывая его в консоли.
 
 Зачем отдельный скрипт, если есть manage_admin.py: там пароль передаётся
@@ -47,13 +46,13 @@ for _root in (Path(__file__).resolve().parent.parent, Path("/neurohub")):
         sys.path.insert(0, str(_root))
         break
 else:
-    raise SystemExit(f"не нашёл каталог app/ ни рядом со скриптом, ни в /neurohub")
+    raise SystemExit("не нашёл каталог app/ ни рядом со скриптом, ни в /neurohub")
 
 from sqlalchemy import select  # noqa: E402
 
+from app.core.security import hash_password, verify_password  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
-from app.models import Customer  # noqa: E402
-from app.security import hash_password, verify_password  # noqa: E402
+from app.db.models import Customer  # noqa: E402
 
 # Без похожих символов (0/O, 1/l/I) — пароль будут набирать глазами
 # с листа, а не вставлять. Знаки — только те, что не спорят с оболочкой.
@@ -134,11 +133,7 @@ def main() -> None:
     # проверки оставил бы новый хеш в базе и пароль — нигде: блокировка.
     title = LABELS[args.label]
     Path(args.out).write_text(
-        f"{title}\n"
-        f"  адрес:  {args.url}\n"
-        f"  логин:  {email}\n"
-        f"  пароль: {password}\n"
-        f"\n",
+        f"{title}\n  адрес:  {args.url}\n  логин:  {email}\n  пароль: {password}\n\n",
         encoding="utf-8",
     )
 

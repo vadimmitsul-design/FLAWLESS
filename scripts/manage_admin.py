@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select
 
+from app.core.security import hash_password, password_problem
 from app.db import SessionLocal
-from app.models import Customer
-from app.security import hash_password, password_problem
+from app.db.models import Customer
 
 
 async def main(email: str, name: str, password: str) -> None:
@@ -29,7 +29,9 @@ async def main(email: str, name: str, password: str) -> None:
         ).scalar_one_or_none()
         if customer is None:
             session.add(
-                Customer(name=name, email=email, password_hash=hash_password(password), role="admin")
+                Customer(
+                    name=name, email=email, password_hash=hash_password(password), role="admin"
+                )
             )
             print(f"created admin '{email}'")
         else:

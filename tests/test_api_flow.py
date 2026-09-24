@@ -6,7 +6,8 @@
 
 import re
 
-from app import llm, ratelimit
+from app.core import ratelimit
+from app.integrations import llm
 
 
 def _plain(html: str) -> str:
@@ -17,6 +18,7 @@ def _plain(html: str) -> str:
     единицы при переносе. Для проверок это шум — схлопываем в обычный
     пробел."""
     return html.replace("&nbsp;", " ").replace(" ", " ")
+
 
 # Дублирует значения из conftest.py намеренно — импортировать оттуда не
 # стоит: pytest сам загружает conftest.py как модуль "conftest" (без
@@ -50,6 +52,7 @@ def _issue_api_key(client):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -98,7 +101,11 @@ def test_insufficient_balance_blocks_call(client):
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "x",
+        },
     )
     assert r.status_code == 402
     assert r.json()["detail"]["error"]["type"] == "insufficient_quota"
@@ -218,7 +225,9 @@ def test_fallback_to_backup_model_on_provider_error(client, monkeypatch):
     async def flaky_chat_completion(alias, messages, **kwargs):
         calls.append(alias)
         if alias == "gpt-5-mini":
-            raise litellm.RateLimitError(message="simulated", llm_provider="openai", model="gpt-5-mini")
+            raise litellm.RateLimitError(
+                message="simulated", llm_provider="openai", model="gpt-5-mini"
+            )
         return await real_chat_completion(alias, messages, **kwargs)
 
     monkeypatch.setattr(llm, "chat_completion", flaky_chat_completion)
@@ -236,7 +245,11 @@ def test_fallback_to_backup_model_on_provider_error(client, monkeypatch):
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "fallback ok"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "fallback ok",
+        },
     )
     assert r.status_code == 200
     assert r.json()["choices"][0]["message"]["content"] == "fallback ok"
@@ -253,7 +266,11 @@ def test_rate_limit_returns_429_after_threshold(client, monkeypatch):
         r = client.post(
             "/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
-            json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+            json={
+                "model": "gpt-5-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "mock_response": "x",
+            },
         )
         statuses.append(r.status_code)
 
@@ -281,7 +298,11 @@ def test_forgot_password_admin_reset_flow(client):
     r = client.post("/login", data={"email": "flow11@test.local", "password": "OldPass123"})
     assert r.status_code == 401
 
-    r = client.post("/login", data={"email": "flow11@test.local", "password": new_password}, follow_redirects=True)
+    r = client.post(
+        "/login",
+        data={"email": "flow11@test.local", "password": new_password},
+        follow_redirects=True,
+    )
     assert r.status_code == 200
 
 

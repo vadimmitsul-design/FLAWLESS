@@ -5,10 +5,11 @@
 import asyncio
 import io
 
-from app import llm
-from app.db import SessionLocal
 from sqlalchemy import select
-from app.models import Customer, WebConversation, WebMessage
+
+from app.db import SessionLocal
+from app.db.models import Customer
+from app.integrations import llm
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -23,6 +24,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -44,7 +46,9 @@ def _topup(client, admin, amount="50"):
 def _balance(email):
     async def _get():
         async with SessionLocal() as session:
-            customer = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one()
+            customer = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
             return customer.balance_rub
 
     return asyncio.run(_get())
@@ -88,7 +92,12 @@ def test_conversation_history_sent_to_provider_on_followup(client, monkeypatch):
 
     async def _fake_call(alias, messages, **kwargs):
         captured.append([dict(m) for m in messages])
-        return alias, "openrouter", "openai/gpt-5-mini", _FakeResponse("ответ " + str(len(captured)))
+        return (
+            alias,
+            "openrouter",
+            "openai/gpt-5-mini",
+            _FakeResponse("ответ " + str(len(captured))),
+        )
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _fake_call)
 
@@ -101,7 +110,8 @@ def test_conversation_history_sent_to_provider_on_followup(client, monkeypatch):
     conv_id = r1.json()["conversation_id"]
 
     r2 = client.post(
-        "/chat/send", data={"conversation_id": conv_id, "model": "gpt-5-mini", "message": "второй вопрос"}
+        "/chat/send",
+        data={"conversation_id": conv_id, "model": "gpt-5-mini", "message": "второй вопрос"},
     )
     assert r2.status_code == 200
 
@@ -134,13 +144,18 @@ class _FakeResponse:
         return {
             "id": self.id,
             "choices": [{"message": {"role": "assistant", "content": self._text}}],
-            "usage": {"prompt_tokens": self.usage.prompt_tokens, "completion_tokens": self.usage.completion_tokens},
+            "usage": {
+                "prompt_tokens": self.usage.prompt_tokens,
+                "completion_tokens": self.usage.completion_tokens,
+            },
         }
 
 
 def test_insufficient_balance_returns_402(client):
     _signup(client, "chat3@test.local")
-    r = client.post("/chat/send", data={"model": "gpt-5-mini", "message": "hi", "mock_response": "x"})
+    r = client.post(
+        "/chat/send", data={"model": "gpt-5-mini", "message": "hi", "mock_response": "x"}
+    )
     assert r.status_code == 402
 
 
@@ -173,6 +188,7 @@ def test_cannot_view_someone_elses_conversation(client, monkeypatch):
     conv_id = r.json()["conversation_id"]
 
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     attacker = TestClient(app)
@@ -197,7 +213,7 @@ def test_text_file_attachment_appended_to_message(client, monkeypatch):
     r = client.post(
         "/chat/send",
         data={"model": "gpt-5-mini", "message": "что тут написано?"},
-        files={"file": ("notes.txt", io.BytesIO("важная заметка".encode("utf-8")), "text/plain")},
+        files={"file": ("notes.txt", io.BytesIO("важная заметка".encode()), "text/plain")},
     )
     assert r.status_code == 200
     sent_content = str(captured[0][-1]["content"])
@@ -244,6 +260,7 @@ def test_child_account_blocked_same_as_api(client):
     )
 
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     kid = TestClient(app)

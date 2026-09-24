@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Публичная витрина в статику: папка, которую принимает Netlify.
 
 Витрина — лендинг, страницы продукта и решений, документация — это чтение
@@ -35,7 +34,7 @@ import re
 import shutil
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,9 +46,23 @@ ROOT = Path(__file__).resolve().parent.parent
 # /v1 здесь сознательно нет: API живёт на своём домене (PUBLIC_BASE_URL), и
 # редирект POST-запроса — источник трудноуловимых ошибок у клиентов.
 APP_ROUTES = [
-    "/login", "/logout", "/signup", "/forgot-password", "/verify",
-    "/chat", "/api-key", "/api-keys", "/topups", "/usage", "/resources",
-    "/shop", "/prompts", "/archive", "/children", "/admin", "/telegram",
+    "/login",
+    "/logout",
+    "/signup",
+    "/forgot-password",
+    "/verify",
+    "/chat",
+    "/api-key",
+    "/api-keys",
+    "/topups",
+    "/usage",
+    "/resources",
+    "/shop",
+    "/prompts",
+    "/archive",
+    "/children",
+    "/admin",
+    "/telegram",
 ]
 
 SITE_DESCRIPTION = (
@@ -59,6 +72,7 @@ SITE_DESCRIPTION = (
 
 
 # ---------- окружение ----------
+
 
 def _prepare_env(database_url: str, api_url: str | None) -> None:
     """Переменные ставятся ДО импорта app.*: Settings() читается один раз при
@@ -78,9 +92,10 @@ def _prepare_env(database_url: str, api_url: str | None) -> None:
 
 # ---------- рендер ----------
 
+
 async def _seed_temporary_db() -> None:
     from app.db import engine
-    from app.models import Base
+    from app.db.models import Base
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -91,11 +106,13 @@ async def _seed_temporary_db() -> None:
     await seed_prices.main()
 
 
-def _page_list(app_main) -> list[tuple[str, str]]:
+def _page_list() -> list[tuple[str, str]]:
     """(адрес, описание для <meta name=description>)."""
+    from app.core.pages import DOCS_PAGES, MARKETING_PAGES
+
     pages = [("/", SITE_DESCRIPTION)]
-    pages += [(path, lead) for path, _tpl, _t, _k, _h1, lead, _here in app_main._MARKETING_PAGES]
-    pages += [(path, lead) for _grp, path, _title, _tpl, lead in app_main._DOCS_PAGES]
+    pages += [(path, lead) for path, _tpl, _t, _k, _h1, lead, _here in MARKETING_PAGES]
+    pages += [(path, lead) for _grp, path, _title, _tpl, lead in DOCS_PAGES]
     return pages
 
 
@@ -128,6 +145,7 @@ def _rewrite_links(html: str, known: set[str], app_url: str, moved: dict[str, in
     туда уходит любой неизвестный адрес, и каждый такой случай виден в отчёте
     сборки.
     """
+
     def sub(m: "re.Match[str]") -> str:
         attr, target = m.group(1), m.group(2)
         base = target.split("#")[0].split("?")[0].rstrip("/") or "/"
@@ -190,7 +208,8 @@ def _inject_meta(html: str, canonical: str | None, description: str) -> str:
 
 # ---------- файлы Netlify ----------
 
-def _check_app_routes(app_main) -> list[str]:
+
+def _check_app_routes(app) -> list[str]:
     """Адреса из APP_ROUTES, которых в приложении нет.
 
     Список писался руками, и часть адресов в приложении не существует:
@@ -198,10 +217,7 @@ def _check_app_routes(app_main) -> list[str]:
     витрины — то есть страховка работала хуже, чем её отсутствие.
     """
     known = set()
-    for route in app_main.app.routes:
-        path = getattr(route, "path", None)
-        if not path:
-            continue
+    for path in app.openapi()["paths"]:
         known.add(path)
         # /admin/customers -> /admin: префикс считаем существующим, если под
         # ним есть хоть один маршрут.
@@ -275,7 +291,7 @@ def _write_netlify_files(out_dir: Path, app_url: str, site_url: str, paths: list
         f"User-agent: *\nAllow: /\n\nSitemap: {site_url}/sitemap.xml\n", encoding="utf-8"
     )
 
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(UTC).strftime("%Y-%m-%d")
     urls = "".join(
         f"  <url><loc>{site_url}{p}</loc>"
         f"<lastmod>{today}</lastmod>"
@@ -330,12 +346,12 @@ def _prepare_out_dir(out_dir: Path) -> bool:
     return True
 
 
-
-async def _page_404_context(app_main) -> dict:
+async def _page_404_context() -> dict:
     from app.db import SessionLocal
+    from app.services.catalog import public_page_context
 
     async with SessionLocal() as session:
-        ctx = await app_main._public_page_context(session)
+        ctx = await public_page_context(session)
     ctx.update(
         {
             "page_title": "Страница не найдена",
@@ -359,7 +375,7 @@ async def _init_model_registry() -> None:
     Полный lifespan звать нельзя: он поднимает уборщик, оповещения и
     телеграм-бота, которым в сборщике делать нечего.
     """
-    from app import llm
+    from app.integrations import llm
 
     llm.init_router()
 
@@ -373,11 +389,11 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
     await _init_model_registry()
 
     from app import main as app_main
-
     from app.db import SessionLocal
+    from app.services.catalog import public_page_context
 
     async with SessionLocal() as session:
-        catalog = await app_main._public_page_context(session)
+        catalog = await public_page_context(session)
     if not catalog["calc_rows"]:
         print(
             "ОШИБКА: ни одной модели с действующей ценой — витрина собралась бы "
@@ -388,7 +404,7 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
         return 1
     print(f"В каталоге моделей с ценой: {len(catalog['calc_rows'])}\n")
 
-    missing = _check_app_routes(app_main)
+    missing = _check_app_routes(app_main.app)
     if missing:
         print(
             "ОШИБКА: в APP_ROUTES есть адреса, которых нет в приложении: "
@@ -397,7 +413,7 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
         )
         return 1
 
-    pages = _page_list(app_main)
+    pages = _page_list()
     known = {p.rstrip("/") or "/" for p, _ in pages}
 
     if not _prepare_out_dir(out_dir):
@@ -424,12 +440,14 @@ async def build(out_dir: Path, app_url: str, site_url: str, seed: bool) -> int:
             target = _out_file(out_dir, path)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(html, encoding="utf-8")
-            print(f"  {path:<34} -> {target.relative_to(out_dir).as_posix()}  ({len(html) // 1024} КБ)")
+            print(
+                f"  {path:<34} -> {target.relative_to(out_dir).as_posix()}  ({len(html) // 1024} КБ)"
+            )
 
         # 404 у Netlify — обычный файл в корне. Шаблон общий с остальной
         # витриной, поэтому «страница не найдена» выглядит как часть сайта.
-        ctx = await _page_404_context(app_main)
-        html = app_main.templates.get_template("page_404.html").render(ctx)
+        ctx = await _page_404_context()
+        html = app_main.app.state.templates.get_template("page_404.html").render(ctx)
         html = _fix_cabinet_link(html, app_url)
         html = _rewrite_links(html, known, app_url, moved)
         html = _inject_meta(html, None, "Страница не найдена.")
@@ -452,14 +470,24 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--out", default="dist", help="куда собрать (по умолчанию dist/)")
-    parser.add_argument("--app-url", default="https://app.flawless.ru",
-                        help="адрес backend-а: туда ведут вход, регистрация и кабинет")
-    parser.add_argument("--site-url", default="https://flawless.ru",
-                        help="адрес самой витрины: canonical, sitemap, Open Graph")
-    parser.add_argument("--api-url", default=None,
-                        help="адрес API для примеров в документации (иначе PUBLIC_BASE_URL из .env)")
-    parser.add_argument("--database-url", default=None,
-                        help="взять цены из этой базы вместо временной с сидом")
+    parser.add_argument(
+        "--app-url",
+        default="https://app.flawless.ru",
+        help="адрес backend-а: туда ведут вход, регистрация и кабинет",
+    )
+    parser.add_argument(
+        "--site-url",
+        default="https://flawless.ru",
+        help="адрес самой витрины: canonical, sitemap, Open Graph",
+    )
+    parser.add_argument(
+        "--api-url",
+        default=None,
+        help="адрес API для примеров в документации (иначе PUBLIC_BASE_URL из .env)",
+    )
+    parser.add_argument(
+        "--database-url", default=None, help="взять цены из этой базы вместо временной с сидом"
+    )
     args = parser.parse_args()
 
     app_url = args.app_url.rstrip("/")

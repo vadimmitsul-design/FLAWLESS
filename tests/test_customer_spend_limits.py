@@ -6,15 +6,18 @@
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app import billing, chatcore, llm, ratelimit
+from app.core import ratelimit
 from app.db import SessionLocal
-from app.models import Customer, UsageEvent
+from app.db.models import Customer, UsageEvent
+from app.integrations import llm
+from app.services import billing
+from app.services import telegram_chat as chatcore
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -29,6 +32,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -39,6 +43,7 @@ def _admin_client():
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)
@@ -123,7 +128,9 @@ def test_customer_monthly_limit_blocks_the_api(client):
     _set_customer_limits(admin, target.id, monthly="100")
     _spend(target.id, "150")  # уже потрачено больше потолка
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 429
     body = r.json()["detail"]["error"]
     assert body["type"] == "spend_limit_exceeded"
@@ -199,7 +206,9 @@ def test_spend_from_the_web_chat_counts_against_the_same_limit(client):
     _set_customer_limits(admin, target.id, monthly="100")
     _spend(target.id, "150", api_key_id=None)  # события чата пишутся без ключа
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 429
 
 
@@ -212,9 +221,11 @@ def test_daily_limit_ignores_spend_from_previous_days(client):
     target = _fund(client, admin, "lim6@test.local")
     api_key = _issue_key(client)
     _set_customer_limits(admin, target.id, daily="100")
-    _spend(target.id, "500", when=datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc))  # давно
+    _spend(target.id, "500", when=datetime(2026, 1, 1, 12, 0, tzinfo=UTC))  # давно
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 200
 
 
@@ -223,16 +234,16 @@ def test_key_limit_still_applies_inside_the_customer_limit(client):
     admin = _admin_client()
     target = _fund(client, admin, "lim7@test.local")
     api_key = _issue_key(client)
-    key_id = int(
-        re.search(r"/api-keys/(\d+)/limits", client.get("/").text).group(1)
-    )
+    key_id = int(re.search(r"/api-keys/(\d+)/limits", client.get("/").text).group(1))
     _set_customer_limits(admin, target.id, monthly="100000")  # общий потолок высокий
     client.post(
         f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "10", "monthly_limit_rub": ""}
     )
     _spend(target.id, "50", api_key_id=key_id)
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 429
     assert r.json()["detail"]["error"]["scope"] == "key"
 
@@ -243,7 +254,9 @@ def test_no_limits_configured_means_no_blocking(client):
     _fund(client, admin, "lim8@test.local")
     api_key = _issue_key(client)
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 200
 
 
@@ -316,9 +329,9 @@ def test_customer_cannot_set_their_own_ceiling(client):
 def test_rate_limit_buckets_do_not_collide_between_keys_and_people():
     """Ключ №N и человек №N — разные сущности; на голых целых id они делили
     бы одно ведро счётчика."""
-    from app.config import settings
+    from app.core.config import settings
 
-    ratelimit._hits.clear()
+    ratelimit.default_limiter.reset()
     for _ in range(settings.rate_limit_per_window):
         assert ratelimit.check(ratelimit.api_key_bucket(777)) is True
     assert ratelimit.check(ratelimit.api_key_bucket(777)) is False
@@ -326,7 +339,7 @@ def test_rate_limit_buckets_do_not_collide_between_keys_and_people():
 
 
 def test_web_chat_is_rate_limited(client, monkeypatch):
-    from app.config import settings
+    from app.core.config import settings
 
     async def _fake_call(alias, messages, **kwargs):
         raise AssertionError("не должны дойти до провайдера в этом тесте")
@@ -335,7 +348,7 @@ def test_web_chat_is_rate_limited(client, monkeypatch):
 
     _signup(client, "lim12@test.local")
     target = _customer("lim12@test.local")
-    ratelimit._hits.clear()
+    ratelimit.default_limiter.reset()
     for _ in range(settings.rate_limit_per_window):
         ratelimit.check(ratelimit.customer_bucket(target.id))
 

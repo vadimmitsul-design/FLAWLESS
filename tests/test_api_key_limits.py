@@ -27,6 +27,7 @@ def _issue_api_key(client, name=""):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -70,7 +71,11 @@ def test_multiple_named_keys_all_independently_valid(client):
         r = client.post(
             "/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
-            json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "ok"},
+            json={
+                "model": "gpt-5-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "mock_response": "ok",
+            },
         )
         assert r.status_code == 200
 
@@ -93,14 +98,22 @@ def test_revoking_one_key_does_not_affect_another(client):
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {key_a}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "x",
+        },
     )
     assert r.status_code == 401
 
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {key_b}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "still works"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "still works",
+        },
     )
     assert r.status_code == 200
 
@@ -119,6 +132,7 @@ def test_cannot_revoke_someone_elses_key(client):
     victim_key_id = _key_id_from_dashboard(client, "Victim key")
 
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     attacker = TestClient(app)
@@ -137,20 +151,30 @@ def test_client_daily_limit_blocks_further_calls_same_day(client):
     api_key = _issue_api_key(client, "Лимитный")
     key_id = _key_id_from_dashboard(client, "Лимитный")
 
-    r = client.post(f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "0.001", "monthly_limit_rub": ""})
+    r = client.post(
+        f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "0.001", "monthly_limit_rub": ""}
+    )
     assert r.status_code in (200, 303)
 
     r1 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "first call goes through"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "first call goes through",
+        },
     )
     assert r1.status_code == 200
 
     r2 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi again"}], "mock_response": "blocked"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi again"}],
+            "mock_response": "blocked",
+        },
     )
     assert r2.status_code == 429
     assert r2.json()["detail"]["error"]["type"] == "spend_limit_exceeded"
@@ -163,21 +187,34 @@ def test_admin_limit_caps_even_when_client_limit_is_higher(client):
     api_key = _issue_api_key(client, "Под колпаком")
     key_id = _key_id_from_dashboard(client, "Под колпаком")
 
-    client.post(f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "1000", "monthly_limit_rub": ""})
-    r = admin.post(f"/admin/api-keys/{key_id}/limits", data={"daily_limit_rub": "0.001", "monthly_limit_rub": ""})
+    client.post(
+        f"/api-keys/{key_id}/limits", data={"daily_limit_rub": "1000", "monthly_limit_rub": ""}
+    )
+    r = admin.post(
+        f"/admin/api-keys/{key_id}/limits",
+        data={"daily_limit_rub": "0.001", "monthly_limit_rub": ""},
+    )
     assert r.status_code in (200, 303)
 
     r1 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "goes through once"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "goes through once",
+        },
     )
     assert r1.status_code == 200
 
     r2 = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "blocked by admin ceiling"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "blocked by admin ceiling",
+        },
     )
     assert r2.status_code == 429
 
@@ -191,20 +228,28 @@ def test_rate_limit_is_per_key_not_per_customer(client):
     key_a = _issue_api_key(client, "A")
     key_b = _issue_api_key(client, "B")
 
-    from app.config import settings
+    from app.core.config import settings
 
     for _ in range(settings.rate_limit_per_window):
         r = client.post(
             "/v1/chat/completions",
             headers={"Authorization": f"Bearer {key_a}"},
-            json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+            json={
+                "model": "gpt-5-mini",
+                "messages": [{"role": "user", "content": "hi"}],
+                "mock_response": "x",
+            },
         )
         assert r.status_code == 200
 
     r_blocked = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {key_a}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "x",
+        },
     )
     assert r_blocked.status_code == 429
 
@@ -212,6 +257,10 @@ def test_rate_limit_is_per_key_not_per_customer(client):
     r_other_key = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {key_b}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "still fine"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "still fine",
+        },
     )
     assert r_other_key.status_code == 200

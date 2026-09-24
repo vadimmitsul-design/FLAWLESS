@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Находки аудита 2026-09-13, партия 1: деньги.
 
 Общее у всех четырёх — вызов проходит, поставщику платим мы, а с клиента не
@@ -9,20 +8,28 @@
 email с другим файлом роняет регистрацию 409-м (в проекте так уже обжигались).
 """
 
+# -*- coding: utf-8 -*-
 import asyncio
 import math
 import pathlib
 import re
+from datetime import UTC
 from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from app import billing, llm, pricing
-from app.config import settings
+from app.api.v1.chat import _allowed_extra_params
+from app.api.validation import money_field
+from app.core.config import settings
+from app.core.formatting import csv_cell
 from app.db import SessionLocal
-from app.models import Customer, TopupRequest, UsageEvent, WalletLedger, utcnow
+from app.db.models import Customer, TopupRequest, UsageEvent, WalletLedger, utcnow
+from app.integrations import llm
+from app.services import billing, pricing
+from app.services.reporting import USAGE_PAGE_LIMIT
+
 
 def _plain(html: str) -> str:
     """Суммы выводятся по-русски: неразрывный пробел между тысячами и
@@ -82,13 +89,17 @@ def _last_event(customer_id):
     async def _get():
         async with SessionLocal() as session:
             return (
-                await session.execute(
-                    select(UsageEvent)
-                    .where(UsageEvent.billing_customer_id == customer_id)
-                    .order_by(UsageEvent.created_at.desc())
-                    .limit(1)
+                (
+                    await session.execute(
+                        select(UsageEvent)
+                        .where(UsageEvent.billing_customer_id == customer_id)
+                        .order_by(UsageEvent.created_at.desc())
+                        .limit(1)
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
 
     return asyncio.run(_get())
 
@@ -241,10 +252,14 @@ def test_topup_is_credited_once_even_on_a_second_confirm(client):
     async def _state():
         async with SessionLocal() as session:
             rows = (
-                await session.execute(
-                    select(WalletLedger).where(WalletLedger.topup_request_id == topup_id)
+                (
+                    await session.execute(
+                        select(WalletLedger).where(WalletLedger.topup_request_id == topup_id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             fresh = await session.get(Customer, customer.id)
             return rows, fresh.balance_rub
 
@@ -323,11 +338,10 @@ def test_fallback_never_goes_to_an_unpriced_model(client, monkeypatch):
 def test_mock_response_is_refused_in_production(client, monkeypatch):
     """Провайдер не вызывается вовсе, ответ выдумывается на месте — а деньги
     списываются настоящие. В тестах параметр нужен, в проде это подарок."""
-    from app import main
 
-    assert "mock_response" in main._allowed_extra_params()
+    assert "mock_response" in _allowed_extra_params()
     monkeypatch.setattr(settings, "environment", "production")
-    assert "mock_response" not in main._allowed_extra_params()
+    assert "mock_response" not in _allowed_extra_params()
 
 
 # ---------- партия 2: защита, которая молча не работала ----------
@@ -341,7 +355,7 @@ def test_dlp_redacts_secrets_inside_content_parts(client, monkeypatch):
     и собирает сам веб-чат при любой прикреплённой картинке. Пока DLP смотрел
     только на строковый content, защита для этого формата была выключена
     целиком и молча — в истории вызовов стояло «ничего не найдено»."""
-    from app import dlp
+    from app.services import dlp
 
     as_string, found_string = dlp.redact_messages(
         [{"role": "user", "content": f"мой ключ {SECRET}"}]
@@ -366,12 +380,13 @@ def test_dlp_redacts_secrets_inside_content_parts(client, monkeypatch):
 
 
 def test_message_text_reads_both_shapes():
-    from app import dlp
+    from app.services import dlp
 
     assert dlp.message_text({"content": "просто строка"}) == "просто строка"
-    assert dlp.message_text(
-        {"content": [{"type": "text", "text": "часть"}, {"type": "image_url"}]}
-    ) == "часть"
+    assert (
+        dlp.message_text({"content": [{"type": "text", "text": "часть"}, {"type": "image_url"}]})
+        == "часть"
+    )
     assert dlp.message_text({}) == ""
 
 
@@ -379,14 +394,14 @@ def test_child_block_list_survives_an_attached_image(client):
     """Блок-лист брал ПОСЛЕДНЕЕ строковое сообщение, а сообщение с картинкой
     уходит массивом частей — ребёнку достаточно было приложить любую
     картинку, чтобы запрет перестал срабатывать, а платил родитель."""
-    from app.main import ChildRequestBlocked, _prepare_messages
+    from app.services.messages import ChildRequestBlocked, prepare_messages
 
     class _Child:
         is_child = True
 
     blocked = [{"role": "user", "content": "напиши сочинение про войну и мир"}]
     with pytest.raises(ChildRequestBlocked):
-        _prepare_messages(_Child(), blocked, None)
+        prepare_messages(_Child(), blocked, None)
 
     with_image = [
         {
@@ -398,7 +413,7 @@ def test_child_block_list_survives_an_attached_image(client):
         }
     ]
     with pytest.raises(ChildRequestBlocked):
-        _prepare_messages(_Child(), with_image, None)
+        prepare_messages(_Child(), with_image, None)
 
 
 def test_healthz_is_degraded_when_no_model_can_be_called(client, monkeypatch):
@@ -420,11 +435,16 @@ def test_empty_model_answer_is_a_failed_call_not_a_paid_one(client, monkeypatch)
     потерян, клиент получил 500."""
 
     async def _empty(alias, messages, allowed_aliases=None, **kwargs):
-        return alias, "openrouter", "openai/gpt-5-mini", {
-            "id": "chatcmpl-empty",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": None}}],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 0},
-        }
+        return (
+            alias,
+            "openrouter",
+            "openai/gpt-5-mini",
+            {
+                "id": "chatcmpl-empty",
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": None}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 0},
+            },
+        )
 
     monkeypatch.setattr(llm, "chat_completion_with_fallback", _empty)
 
@@ -457,18 +477,25 @@ def test_no_choices_at_all_does_not_leave_the_reserve_hanging(client, monkeypatc
     _topup(client, admin, "50")
     customer = _customer("audit_nochoices@test.local")
 
-    assert client.post("/chat/send", data={"model": "gpt-5-mini", "message": "привет"}).status_code == 502
+    assert (
+        client.post("/chat/send", data={"model": "gpt-5-mini", "message": "привет"}).status_code
+        == 502
+    )
 
     async def _pending():
         async with SessionLocal() as session:
             return (
-                await session.execute(
-                    select(UsageEvent).where(
-                        UsageEvent.billing_customer_id == customer.id,
-                        UsageEvent.status == "pending",
+                (
+                    await session.execute(
+                        select(UsageEvent).where(
+                            UsageEvent.billing_customer_id == customer.id,
+                            UsageEvent.status == "pending",
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
     assert asyncio.run(_pending()) == [], "резерв повис в pending"
 
@@ -483,6 +510,7 @@ def test_showroom_links_disappear_with_the_showroom(client, monkeypatch):
     assert 'href="/docs"' in html, "документация нужна и своим разработчикам"
     assert 'href="/signup"' not in html, "регистрации во внутреннем контуре нет"
 
+
 # ---------- партия 3: ресурсы и сроки ----------
 
 
@@ -490,40 +518,40 @@ def test_a_resource_paid_through_today_is_not_expired():
     """«Оплачено до 13.09» значит, что 13 сентября ещё оплачено. Вычитание
     моментов давало ровно суточную ошибку: в 00:01 того же дня ресурс уже
     показывался просроченным — и в кабинете, и в телеграме."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from app.models import days_left
+    from app.db.models import days_left
 
-    today = datetime(2026, 9, 13, 0, 1, tzinfo=timezone.utc)
-    paid_through_today = datetime(2026, 9, 13, 0, 0, tzinfo=timezone.utc)
+    today = datetime(2026, 9, 13, 0, 1, tzinfo=UTC)
+    paid_through_today = datetime(2026, 9, 13, 0, 0, tzinfo=UTC)
     assert days_left(paid_through_today, today) == 0
 
-    tomorrow = datetime(2026, 9, 14, 0, 0, tzinfo=timezone.utc)
+    tomorrow = datetime(2026, 9, 14, 0, 0, tzinfo=UTC)
     assert days_left(tomorrow, today) == 1
 
-    yesterday = datetime(2026, 9, 12, 0, 0, tzinfo=timezone.utc)
+    yesterday = datetime(2026, 9, 12, 0, 0, tzinfo=UTC)
     assert days_left(yesterday, today) == -1
 
     # и вечером того же дня ответ тот же — момент внутри суток не важен
-    late = datetime(2026, 9, 13, 23, 59, tzinfo=timezone.utc)
+    late = datetime(2026, 9, 13, 23, 59, tzinfo=UTC)
     assert days_left(paid_through_today, late) == 0
     assert days_left(None, late) is None
 
 
 def test_resource_state_calls_today_expiring_not_expired(client):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
 
-    from app.main import _resource_state
-    from app.models import Resource
+    from app.db.models import Resource
+    from app.services.resources import resource_state
 
-    now = datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
-    today = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 13, tzinfo=timezone.utc))
-    assert _resource_state(today, now, 7)["code"] == "soon"
-    assert _resource_state(today, now, 7)["days"] == 0
+    now = datetime(2026, 9, 13, 12, 0, tzinfo=UTC)
+    today = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 13, tzinfo=UTC))
+    assert resource_state(today, now, 7)["code"] == "soon"
+    assert resource_state(today, now, 7)["days"] == 0
 
-    gone = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 11, tzinfo=timezone.utc))
-    assert _resource_state(gone, now, 7)["code"] == "expired"
-    assert _resource_state(gone, now, 7)["days"] == -2, "просрочка завышена на день"
+    gone = Resource(name="x", kind="proxy", expires_at=datetime(2026, 9, 11, tzinfo=UTC))
+    assert resource_state(gone, now, 7)["code"] == "expired"
+    assert resource_state(gone, now, 7)["days"] == -2, "просрочка завышена на день"
 
 
 def test_payments_in_other_currencies_are_not_silently_dropped(client):
@@ -536,19 +564,27 @@ def test_payments_in_other_currencies_are_not_silently_dropped(client):
 
     admin.post(
         "/admin/resources/new",
-        data={"kind": "subscription", "name": "Подписка за доллары",
-              "owner_customer_id": str(owner.id), "expires_at": "2027-01-01"},
+        data={
+            "kind": "subscription",
+            "name": "Подписка за доллары",
+            "owner_customer_id": str(owner.id),
+            "expires_at": "2027-01-01",
+        },
     )
 
     async def _rid():
         async with SessionLocal() as session:
-            from app.models import Resource
+            from app.db.models import Resource
 
             return (
-                await session.execute(
-                    select(Resource).where(Resource.name == "Подписка за доллары")
+                (
+                    await session.execute(
+                        select(Resource).where(Resource.name == "Подписка за доллары")
+                    )
                 )
-            ).scalar_one().id
+                .scalar_one()
+                .id
+            )
 
     rid = asyncio.run(_rid())
     assert admin.post(
@@ -580,18 +616,20 @@ def test_a_typo_in_the_date_can_be_fixed_without_sql(client):
 
     admin.post(
         "/admin/resources/new",
-        data={"kind": "proxy", "name": "Прокси с опечаткой",
-              "owner_customer_id": str(owner.id), "expires_at": "2036-09-30"},
+        data={
+            "kind": "proxy",
+            "name": "Прокси с опечаткой",
+            "owner_customer_id": str(owner.id),
+            "expires_at": "2036-09-30",
+        },
     )
 
     async def _resource():
         async with SessionLocal() as session:
-            from app.models import Resource
+            from app.db.models import Resource
 
             return (
-                await session.execute(
-                    select(Resource).where(Resource.name == "Прокси с опечаткой")
-                )
+                await session.execute(select(Resource).where(Resource.name == "Прокси с опечаткой"))
             ).scalar_one()
 
     res = asyncio.run(_resource())
@@ -599,8 +637,14 @@ def test_a_typo_in_the_date_can_be_fixed_without_sql(client):
 
     r = admin.post(
         f"/admin/resources/{res.id}/edit",
-        data={"name": "Прокси исправленный", "owner_customer_id": str(owner.id),
-              "account": "login@vpn", "url": "", "expires_at": "2026-10-01", "note": ""},
+        data={
+            "name": "Прокси исправленный",
+            "owner_customer_id": str(owner.id),
+            "account": "login@vpn",
+            "url": "",
+            "expires_at": "2026-10-01",
+            "note": "",
+        },
     )
     assert r.status_code in (200, 303)
 
@@ -622,7 +666,7 @@ def test_only_an_admin_can_edit_a_resource(client):
 def _resource_by_id(resource_id):
     async def _get():
         async with SessionLocal() as session:
-            from app.models import Resource
+            from app.db.models import Resource
 
             return await session.get(Resource, resource_id)
 
@@ -636,9 +680,9 @@ def test_reserve_covers_the_most_expensive_model_in_the_chain(client, monkeypatc
     """Резерв брался по цене запрошенной модели, а списывается цена той, что
     фактически ответила. Цепочка по умолчанию ведёт самый дешёвый алиас на
     почти самый дорогой — ×4,5 по выводу, и запаса 1.5 на это не хватает."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    from app.models import ModelPrice
+    from app.db.models import ModelPrice
 
     async def _add_expensive_fallback():
         async with SessionLocal() as session:
@@ -648,7 +692,7 @@ def test_reserve_covers_the_most_expensive_model_in_the_chain(client, monkeypatc
                     model="google/gemini-3.5-flash",
                     price_per_1m_input_tokens=Decimal("1.50"),
                     price_per_1m_output_tokens=Decimal("9.00"),
-                    valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    valid_from=datetime(2026, 1, 1, tzinfo=UTC),
                 )
             )
             await session.commit()
@@ -676,10 +720,14 @@ def test_reserve_covers_the_most_expensive_model_in_the_chain(client, monkeypatc
         async def _cleanup():
             async with SessionLocal() as session:
                 row = (
-                    await session.execute(
-                        select(ModelPrice).where(ModelPrice.model == "google/gemini-3.5-flash")
+                    (
+                        await session.execute(
+                            select(ModelPrice).where(ModelPrice.model == "google/gemini-3.5-flash")
+                        )
                     )
-                ).scalars().first()
+                    .scalars()
+                    .first()
+                )
                 if row is not None:
                     await session.delete(row)
                     await session.commit()
@@ -691,14 +739,17 @@ def test_prompt_fee_counts_towards_the_spend_limit(client):
     """Вся арифметика «сколько потрачено» построена на charged_rub. Пока
     плата за промпт шла мимо, бюджетный потолок её не видел вовсе, а клиент
     в кабинете видел почти нулевой расход при вычерпанном кошельке."""
-    from app.models import Prompt, UsageEvent as UE
+    from app.db.models import Prompt
+    from app.db.models import UsageEvent as UE
 
     _signup(client, "audit_promptfee@test.local")
     payer = _customer("audit_promptfee@test.local")
 
     async def _charge():
         async with SessionLocal() as session:
-            author = Customer(email="audit_promptauthor@test.local", name="Автор", password_hash="x")
+            author = Customer(
+                email="audit_promptauthor@test.local", name="Автор", password_hash="x"
+            )
             session.add(author)
             await session.flush()
             prompt = Prompt(
@@ -732,8 +783,8 @@ def test_prompt_fee_counts_towards_the_spend_limit(client):
 def test_telegram_never_writes_the_bot_token_into_logs():
     """httpx кладёт в текст ошибки полный URL, а в URL Telegram токен стоит
     прямо в пути — любой logger.warning(... %r, e) писал боевой токен в лог."""
-    from app import telegram_bot
-    from app.config import settings as app_settings
+    from app.core.config import settings as app_settings
+    from app.integrations import telegram_bot
 
     token = app_settings.telegram_bot_token
     assert token, "тестовое окружение должно задавать токен"
@@ -747,7 +798,7 @@ def test_long_answers_are_sent_in_full_not_truncated(monkeypatch):
     получал обрубок на полуслове и не знал, что ответ продолжался."""
     import asyncio as aio
 
-    from app import telegram_bot
+    from app.integrations import telegram_bot
 
     sent = []
 
@@ -774,7 +825,7 @@ def test_long_answers_are_sent_in_full_not_truncated(monkeypatch):
 def test_voice_is_not_transcribed_for_someone_who_cannot_pay(client):
     """Распознавание — платный вызов Whisper нашим ключом, и он шёл до
     единственной проверки: до ограничителя частоты, до потолков, до баланса."""
-    from app import chatcore
+    from app.services import telegram_chat as chatcore
 
     _signup(client, "audit_voice@test.local")
     person = _customer("audit_voice@test.local")
@@ -792,7 +843,7 @@ def test_voice_is_not_transcribed_for_someone_who_cannot_pay(client):
 
 
 def _make_event(customer_id, api_key_id, model, charged, when=None):
-    from app.models import UsageEvent as UE
+    from app.db.models import UsageEvent as UE
 
     async def _add():
         async with SessionLocal() as session:
@@ -817,7 +868,7 @@ def _make_event(customer_id, api_key_id, model, charged, when=None):
 
 
 def _key_ids(email):
-    from app.models import ApiKey
+    from app.db.models import ApiKey
 
     async def _get():
         async with SessionLocal() as session:
@@ -828,7 +879,9 @@ def _key_ids(email):
                 k.id
                 for k in (
                     await session.execute(select(ApiKey).where(ApiKey.customer_id == person.id))
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             ]
 
     return asyncio.run(_get())
@@ -893,21 +946,24 @@ def test_history_export_opens_in_russian_excel(client):
 def test_export_is_not_cut_by_the_page_limit(client):
     """Страница показывает последние N, выгрузка обязана отдать всё за
     период — иначе к акту приложить нечего."""
-    from app import main
 
     _signup(client, "audit_csvall@test.local")
     person = _customer("audit_csvall@test.local")
-    limit = main._USAGE_PAGE_LIMIT
-    for i in range(3):
+    limit = USAGE_PAGE_LIMIT
+    for _ in range(3):
         _make_event(person.id, None, "openai/gpt-5-mini", "1.0000")
 
     async def _count_all():
         async with SessionLocal() as session:
             rows = (
-                await session.execute(
-                    select(UsageEvent).where(UsageEvent.customer_id == person.id)
+                (
+                    await session.execute(
+                        select(UsageEvent).where(UsageEvent.customer_id == person.id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return len(rows)
 
     total = asyncio.run(_count_all())
@@ -930,38 +986,36 @@ def test_csv_export_does_not_carry_formulas(client):
     """Имя клиент задаёт себе сам при регистрации, а выгрузку открывает
     бухгалтер. Ячейка, начинающаяся с =, исполняется как формула, и один
     клик отправляет чужие email и балансы из соседних строк наружу."""
-    from app import main
 
-    assert main._csv_cell('=HYPERLINK("https://evil.tld")').startswith("'=")
-    assert main._csv_cell("+1") .startswith("'+")
-    assert main._csv_cell("-5").startswith("'-")
-    assert main._csv_cell("@x").startswith("'@")
-    assert main._csv_cell("Иванов") == "Иванов"
-    assert main._csv_cell(None) == ""
+    assert csv_cell('=HYPERLINK("https://evil.tld")').startswith("'=")
+    assert csv_cell("+1").startswith("'+")
+    assert csv_cell("-5").startswith("'-")
+    assert csv_cell("@x").startswith("'@")
+    assert csv_cell("Иванов") == "Иванов"
+    assert csv_cell(None) == ""
 
     _signup(client, "audit_formula@test.local", name='=HYPERLINK("https://evil.tld","отчёт")')
     admin = _admin_client()
     body = admin.get("/admin/customers.csv").content.decode("utf-8")
-    assert '=HYPERLINK' in body, "проверяем не то — имени вообще нет в выгрузке"
+    assert "=HYPERLINK" in body, "проверяем не то — имени вообще нет в выгрузке"
     for line in body.splitlines()[1:]:
         for cell in line.split(";"):
             assert not cell.startswith("="), f"формула уехала в выгрузку: {cell[:40]}"
 
 
 def test_money_fields_understand_a_russian_comma(client):
-    from app import main
 
-    assert main._money_field("1,5", "лимит") == Decimal("1.5")
-    assert main._money_field("1 000,25", "лимит") == Decimal("1000.25")
-    assert main._money_field("  ", "лимит") is None
-    assert main._money_field("10", "лимит") == Decimal("10")
+    assert money_field("1,5", "лимит") == Decimal("1.5")
+    assert money_field("1 000,25", "лимит") == Decimal("1000.25")
+    assert money_field("  ", "лимит") is None
+    assert money_field("10", "лимит") == Decimal("10")
 
     with pytest.raises(HTTPException) as bad:
-        main._money_field("вагон", "лимит")
+        money_field("вагон", "лимит")
     assert bad.value.status_code == 400
 
     with pytest.raises(HTTPException) as negative:
-        main._money_field("-5", "лимит")
+        money_field("-5", "лимит")
     assert negative.value.status_code == 400
 
 
@@ -969,7 +1023,7 @@ def test_a_comma_in_the_limit_form_is_an_error_not_a_500(client):
     """Раньше «1,5» роняло денежную форму в 500, а «-5» принималось молча и
     ключ навсегда отвечал 429: 0 >= -5 истинно всегда."""
     _signup(client, "audit_limitform@test.local")
-    r = client.post("/api-key/regenerate", data={"name": "k"})
+    client.post("/api-key/regenerate", data={"name": "k"})
     key_id = _key_ids("audit_limitform@test.local")[0]
 
     assert client.post(
@@ -990,7 +1044,7 @@ def test_a_comma_in_the_limit_form_is_an_error_not_a_500(client):
 def test_oversized_request_is_refused_before_anything_is_parsed(client):
     """Форма разбирается раньше проверки сессии, поэтому аноним мог заставить
     сервис принять файл любого размера. Потолок стоит до разбора тела."""
-    from app.config import settings as app_settings
+    from app.core.config import settings as app_settings
 
     client.post("/logout")
     big = b"x" * (app_settings.max_request_body_bytes + 1024)
@@ -1005,15 +1059,15 @@ def test_oversized_request_is_refused_before_anything_is_parsed(client):
 def test_password_reset_queue_cannot_be_flooded(client):
     """Единственный инструмент восстановления пароля — очередь у
     администратора. Настоящая заявка тонула бы среди мусора."""
-    from app import ratelimit
+    from app.core import ratelimit
 
-    ratelimit._login_hits.clear()
+    ratelimit.login_limiter.reset()
     statuses = []
     for i in range(14):
         r = client.post("/forgot-password", data={"email": f"audit_flood{i}@test.local"})
         statuses.append(r.status_code)
     assert 429 in statuses, "очередь заявок наливается без ограничений"
-    ratelimit._login_hits.clear()
+    ratelimit.login_limiter.reset()
 
 
 # ---------- партия 7: читаемость и пустые состояния ----------
@@ -1025,10 +1079,10 @@ def _oklch_to_srgb(L, C, H):
     l_ = L + 0.3963377774 * a + 0.2158037573 * b
     m_ = L - 0.1055613458 * a - 0.0638541728 * b
     s_ = L - 0.0894841775 * a - 1.2914855480 * b
-    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
-    r = +4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s
-    g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s
-    bl = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s
+    long_component, m, s = l_**3, m_**3, s_**3
+    r = +4.0767416621 * long_component - 3.3077115913 * m + 0.2309699292 * s
+    g = -1.2684380046 * long_component + 2.6097574011 * m - 0.3413193965 * s
+    bl = -0.0041960863 * long_component - 0.7034186147 * m + 1.7076147010 * s
 
     def enc(x):
         x = max(0.0, min(1.0, x))
@@ -1121,9 +1175,7 @@ def test_cabinet_does_not_deny_calls_that_happened(client):
 
     _signup(client, "audit_old@test.local")
     person = _customer("audit_old@test.local")
-    _make_event(
-        person.id, None, "openai/gpt-5-mini", "7.7777", when=utcnow() - timedelta(days=30)
-    )
+    _make_event(person.id, None, "openai/gpt-5-mini", "7.7777", when=utcnow() - timedelta(days=30))
 
     html = client.get("/").text
     assert "Вызовов ещё не было" not in html, "страница отрицает вызов, который сама показывает"
@@ -1138,9 +1190,7 @@ def test_empty_chart_state_is_reachable(client):
 
     _signup(client, "audit_chart@test.local")
     person = _customer("audit_chart@test.local")
-    _make_event(
-        person.id, None, "openai/gpt-5-mini", "1.0000", when=utcnow() - timedelta(days=40)
-    )
+    _make_event(person.id, None, "openai/gpt-5-mini", "1.0000", when=utcnow() - timedelta(days=40))
 
     html = client.get("/").text
     body = html[html.index("</style>") :]

@@ -12,15 +12,21 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
-from app import billing, chatcore, llm, telegram_bot
 from app.db import SessionLocal
-from app.models import Customer, TelegramLink, TelegramLinkCode
+from app.db.models import Customer, TelegramLink, TelegramLinkCode
+from app.integrations import llm, telegram_bot
+from app.services import billing
+from app.services import telegram_chat as chatcore
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
 
 _FAKE_RESPONSE = {
-    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "prompt_tokens_details": {"cached_tokens": 0}},
+    "usage": {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "prompt_tokens_details": {"cached_tokens": 0},
+    },
     "choices": [{"message": {"content": "mocked reply"}}],
 }
 
@@ -34,12 +40,15 @@ def _run(coro):
 
 
 def _signup(client, email, name="TG User", password="TestPass123"):
-    r = client.post("/signup", data={"email": email, "name": name, "password": password}, follow_redirects=True)
+    r = client.post(
+        "/signup", data={"email": email, "name": name, "password": password}, follow_redirects=True
+    )
     assert r.status_code == 200
 
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -61,7 +70,9 @@ def _topup(client, admin, amount="50"):
 def _customer_id(email):
     async def _get():
         async with SessionLocal() as session:
-            customer = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one()
+            customer = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
             return customer.id
 
     return _run(_get())
@@ -127,7 +138,9 @@ def test_telegram_start_links_account(client, monkeypatch):
     code = _link_code(client)
     customer_id = _customer_id("tguser1@test.local")
 
-    _run(telegram_bot._handle_update({"message": {"chat": {"id": 555111}, "text": f"/start {code}"}}))
+    _run(
+        telegram_bot._handle_update({"message": {"chat": {"id": 555111}, "text": f"/start {code}"}})
+    )
 
     assert sent and "Готово" in sent[-1][1]
 
@@ -137,8 +150,14 @@ def test_telegram_start_links_account(client, monkeypatch):
                 await session.execute(select(TelegramLink).where(TelegramLink.chat_id == 555111))
             ).scalar_one()
             remaining = (
-                await session.execute(select(TelegramLinkCode).where(TelegramLinkCode.code == code))
-            ).scalars().all()
+                (
+                    await session.execute(
+                        select(TelegramLinkCode).where(TelegramLinkCode.code == code)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return link, remaining
 
     link, remaining = _run(_check())
@@ -152,12 +171,16 @@ def test_telegram_start_with_unknown_code_rejected():
     async def _fake_send(chat_id, text):
         sent.append((chat_id, text))
 
-    import app.telegram_bot as tb_module
+    import app.integrations.telegram_bot as tb_module
 
     orig = tb_module.send_message
     tb_module.send_message = _fake_send
     try:
-        _run(tb_module._handle_update({"message": {"chat": {"id": 999888}, "text": "/start does-not-exist"}}))
+        _run(
+            tb_module._handle_update(
+                {"message": {"chat": {"id": 999888}, "text": "/start does-not-exist"}}
+            )
+        )
     finally:
         tb_module.send_message = orig
 
@@ -200,10 +223,16 @@ def test_telegram_text_message_bills_and_replies(client, monkeypatch):
     admin = _admin_client()
     _topup(client, admin, "50")
     code = _link_code(client)
-    _run(telegram_bot._handle_update({"message": {"chat": {"id": 777222}, "text": f"/start {code}"}}))
+    _run(
+        telegram_bot._handle_update({"message": {"chat": {"id": 777222}, "text": f"/start {code}"}})
+    )
     sent.clear()
 
-    _run(telegram_bot._handle_update({"message": {"chat": {"id": 777222}, "text": "Привет, как дела?"}}))
+    _run(
+        telegram_bot._handle_update(
+            {"message": {"chat": {"id": 777222}, "text": "Привет, как дела?"}}
+        )
+    )
 
     assert sent == [(777222, "mocked reply")]  # без префикса — префикс только у голосовых
 
@@ -222,7 +251,9 @@ def test_telegram_text_message_insufficient_balance_replies_with_notice(client, 
 
     _signup(client, "tguser3@test.local")  # без пополнения — баланс 0
     code = _link_code(client)
-    _run(telegram_bot._handle_update({"message": {"chat": {"id": 333444}, "text": f"/start {code}"}}))
+    _run(
+        telegram_bot._handle_update({"message": {"chat": {"id": 333444}, "text": f"/start {code}"}})
+    )
     sent.clear()
 
     _run(telegram_bot._handle_update({"message": {"chat": {"id": 333444}, "text": "hello"}}))

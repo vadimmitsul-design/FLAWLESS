@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Самостоятельная регистрация сотрудников только с корпоративной почты.
 
 Внутренний контур переведён с приглашений на открытую регистрацию, но
@@ -19,9 +18,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from app.config import allowed_signup_domains, email_domain_allowed, settings
+from app.core.config import allowed_signup_domains, email_domain_allowed, settings
 from app.db import SessionLocal
-from app.models import Customer
+from app.db.models import Customer
 
 CORP = "rossi.ru"
 
@@ -103,9 +102,12 @@ def test_lookalike_domains_do_not_pass(client, corporate):
     """Ровно тот случай, ради которого сравнение идёт по последнему домену,
     а не поиском подстроки."""
     for email in ("dom_a@rossi.ru.evil.com", "dom_b@notrossi.ru", "dom_c@sub.rossi.ru"):
-        assert client.post(
-            "/signup", data={"email": email, "name": "x", "password": "RabochiyPass123"}
-        ).status_code == 400
+        assert (
+            client.post(
+                "/signup", data={"email": email, "name": "x", "password": "RabochiyPass123"}
+            ).status_code
+            == 400
+        )
         assert _exists(email) is None
 
 

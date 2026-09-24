@@ -5,15 +5,17 @@
 в test_features_wave2.py)."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app import billing, llm, main, pricing, reaper
 from app.db import SessionLocal
-from app.models import Customer, ModelPrice, UsageEvent
+from app.db.models import Customer, ModelPrice, UsageEvent
+from app.integrations import llm
+from app.services import billing, pricing
+from app.workers import reaper
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -38,6 +40,7 @@ def _issue_api_key(client):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -49,17 +52,22 @@ def _admin_client():
 def _topup(client, admin, amount="50"):
     import re
 
-    client.post("/topups/new", data={"amount_rub": amount})
-    m = re.search(r"admin/topups/(\d+)/confirm", admin.get("/admin/topups").text)
-    assert m
-    r = admin.post(f"/admin/topups/{m.group(1)}/confirm")
+    pending_before = set(re.findall(r"admin/topups/(\d+)/confirm", admin.get("/admin/topups").text))
+    response = client.post("/topups/new", data={"amount_rub": amount})
+    assert response.status_code in (200, 303)
+    pending_after = set(re.findall(r"admin/topups/(\d+)/confirm", admin.get("/admin/topups").text))
+    created = pending_after - pending_before
+    assert len(created) == 1
+    r = admin.post(f"/admin/topups/{created.pop()}/confirm")
     assert r.status_code in (200, 303)
 
 
 def _customer_id(email):
     async def _get():
         async with SessionLocal() as session:
-            customer = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one()
+            customer = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
             return customer.id
 
     return asyncio.run(_get())
@@ -68,7 +76,9 @@ def _customer_id(email):
 def _balance(email):
     async def _get():
         async with SessionLocal() as session:
-            customer = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one()
+            customer = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
             return customer.balance_rub
 
     return asyncio.run(_get())
@@ -86,11 +96,21 @@ def test_second_reservation_blocked_while_first_still_pending(client):
     async def _run():
         async with SessionLocal() as session:
             await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("8"),
             )
             with pytest.raises(billing.InsufficientBalance):
                 await billing.start_call(
-                    session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                    session,
+                    customer_id,
+                    customer_id,
+                    "openai",
+                    "gpt-5-mini",
+                    estimated_reserve_rub=Decimal("8"),
                 )
 
     asyncio.run(_run())
@@ -105,12 +125,22 @@ def test_reservation_released_once_first_call_finalizes(client):
     async def _run():
         async with SessionLocal() as session:
             event = await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("8"),
             )
             await billing.finalize_failure(session, event, error_code="Timeout", latency_ms=10)
             # Резерв снят вместе со сменой статуса — второй вызов теперь проходит.
             await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("8"),
             )
 
     asyncio.run(_run())
@@ -127,7 +157,7 @@ def test_cache_write_tokens_priced_separately_from_cache_read():
         price_per_1m_output_tokens=Decimal("15"),
         price_per_1m_cached_tokens=Decimal("0.3"),
         price_per_1m_cache_write_tokens=Decimal("3.75"),
-        valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        valid_from=datetime(2026, 1, 1, tzinfo=UTC),
     )
     usage = pricing.UsageAmounts(
         input_text_tokens=1000, output_tokens=500, cached_tokens=200, cache_write_tokens=100
@@ -155,7 +185,9 @@ async def _fake_stream_then_break(alias, messages, **kwargs):
         yield {"id": "chatcmpl-test", "choices": [{"delta": {"content": "Hello "}}]}
         yield {
             "id": "chatcmpl-test",
-            "choices": [{"delta": {"content": "there, this is a partial reply before the connection drops"}}],
+            "choices": [
+                {"delta": {"content": "there, this is a partial reply before the connection drops"}}
+            ],
         }
         raise RuntimeError("simulated connection drop")
 
@@ -175,7 +207,11 @@ def test_interrupted_stream_charges_for_delivered_partial_content(client, monkey
         "POST",
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
     ) as r:
         assert r.status_code == 200
         list(r.iter_lines())
@@ -186,15 +222,21 @@ def test_interrupted_stream_charges_for_delivered_partial_content(client, monkey
     async def _check():
         async with SessionLocal() as session:
             customer = (
-                await session.execute(select(Customer).where(Customer.email == "interrupt1@test.local"))
+                await session.execute(
+                    select(Customer).where(Customer.email == "interrupt1@test.local")
+                )
             ).scalar_one()
             event = (
-                await session.execute(
-                    select(UsageEvent)
-                    .where(UsageEvent.billing_customer_id == customer.id)
-                    .order_by(UsageEvent.created_at.desc())
+                (
+                    await session.execute(
+                        select(UsageEvent)
+                        .where(UsageEvent.billing_customer_id == customer.id)
+                        .order_by(UsageEvent.created_at.desc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             return event
 
     event = asyncio.run(_check())
@@ -219,7 +261,11 @@ def test_stream_failing_before_any_content_charges_nothing(client, monkeypatch):
         "POST",
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
     ) as r:
         list(r.iter_lines())
 
@@ -295,8 +341,14 @@ def test_real_disconnect_via_aclose_still_charges_and_releases_reservation(clien
 
     async def _fake_stream(alias, messages, **kwargs):
         async def gen():
-            yield {"id": "chatcmpl-test", "choices": [{"delta": {"content": "Hello there, a longer partial reply"}}]}
-            yield {"id": "chatcmpl-test", "choices": [{"delta": {"content": " that never finishes"}}]}
+            yield {
+                "id": "chatcmpl-test",
+                "choices": [{"delta": {"content": "Hello there, a longer partial reply"}}],
+            }
+            yield {
+                "id": "chatcmpl-test",
+                "choices": [{"delta": {"content": " that never finishes"}}],
+            }
 
         return alias, "openrouter", "openai/gpt-5-mini", gen()
 
@@ -311,11 +363,25 @@ def test_real_disconnect_via_aclose_still_charges_and_releases_reservation(clien
     async def _run():
         async with SessionLocal() as session:
             event = await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("10")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("10"),
             )
-            gen = main._stream_chat_completion(
-                session, event, "gpt-5-mini", [{"role": "user", "content": "hi"}], {}, None, customer_id
+            from app.api.v1.chat import _stream_chat_completion
+            from app.services.chat import ChatCall
+
+            call = ChatCall(
+                event=event,
+                alias="gpt-5-mini",
+                messages=[{"role": "user", "content": "hi"}],
+                extra={},
+                pricing_config=await billing.get_pricing_config(session),
+                allowed_aliases={"gpt-5-mini"},
             )
+            gen = _stream_chat_completion(session, call)
             await gen.__anext__()  # клиент реально получил первый чанк...
             await gen.aclose()  # ...и тут же оборвал соединение
             return event.id
@@ -341,9 +407,13 @@ def test_missing_price_reserve_falls_back_to_nonzero_default():
         async with SessionLocal() as session:
             pricing_cfg = await billing.get_pricing_config(session)
             provider, model = llm.resolve_alias("claude-sonnet")  # не засеян в _seed_prices
-            price = await pricing.find_price(session, provider, model, None, None, datetime.now(timezone.utc))
+            price = await pricing.find_price(
+                session, provider, model, None, None, datetime.now(UTC)
+            )
             assert price is None
-            return billing.estimate_reserve_rub(price, [{"role": "user", "content": "hi"}], {}, pricing_cfg)
+            return billing.estimate_reserve_rub(
+                price, [{"role": "user", "content": "hi"}], {}, pricing_cfg
+            )
 
     reserve = asyncio.run(_run())
     assert reserve > 0
@@ -359,14 +429,23 @@ def test_second_reservation_blocked_even_for_unpriced_model(client):
         async with SessionLocal() as session:
             pricing_cfg = await billing.get_pricing_config(session)
             provider, model = llm.resolve_alias("claude-sonnet")
-            price = await pricing.find_price(session, provider, model, None, None, datetime.now(timezone.utc))
-            reserve = billing.estimate_reserve_rub(price, [{"role": "user", "content": "hi"}], {}, pricing_cfg)
+            price = await pricing.find_price(
+                session, provider, model, None, None, datetime.now(UTC)
+            )
+            reserve = billing.estimate_reserve_rub(
+                price, [{"role": "user", "content": "hi"}], {}, pricing_cfg
+            )
             await billing.start_call(
                 session, customer_id, customer_id, provider, model, estimated_reserve_rub=reserve
             )
             with pytest.raises(billing.InsufficientBalance):
                 await billing.start_call(
-                    session, customer_id, customer_id, provider, model, estimated_reserve_rub=reserve
+                    session,
+                    customer_id,
+                    customer_id,
+                    provider,
+                    model,
+                    estimated_reserve_rub=reserve,
                 )
 
     asyncio.run(_run())
@@ -404,7 +483,11 @@ def test_idempotency_race_returns_conflict_not_500(client, monkeypatch):
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}", "Idempotency-Key": "race-key"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "mock_response": "x"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mock_response": "x",
+        },
     )
     assert r.status_code == 409
     assert r.json()["detail"]["error"]["type"] == "idempotency_conflict"
@@ -420,14 +503,22 @@ def test_idempotency_key_reused_with_different_request_is_rejected(client):
     r1 = client.post(
         "/v1/chat/completions",
         headers=headers,
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "first question"}], "mock_response": "a"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "first question"}],
+            "mock_response": "a",
+        },
     )
     assert r1.status_code == 200
 
     r2 = client.post(
         "/v1/chat/completions",
         headers=headers,
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "totally different question"}], "mock_response": "b"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "totally different question"}],
+            "mock_response": "b",
+        },
     )
     assert r2.status_code == 409
     assert r2.json()["detail"]["error"]["type"] == "idempotency_key_reused"
@@ -454,6 +545,7 @@ def test_idempotency_key_scoped_per_child_not_shared_family_wide(client):
     )
 
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     kid1 = TestClient(app)
@@ -468,17 +560,28 @@ def test_idempotency_key_scoped_per_child_not_shared_family_wide(client):
     r1 = kid1.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {kid1_key}", "Idempotency-Key": shared_key},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "объясни теорему пифагора"}], "mock_response": "kid1 reply"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "объясни теорему пифагора"}],
+            "mock_response": "kid1 reply",
+        },
     )
     r2 = kid2.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {kid2_key}", "Idempotency-Key": shared_key},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "объясни теорему пифагора"}], "mock_response": "kid2 reply"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "объясни теорему пифагора"}],
+            "mock_response": "kid2 reply",
+        },
     )
 
     assert r1.status_code == 200
     assert r2.status_code == 200  # не 409 — разные акторы, один и тот же ключ не конфликтует
-    assert r1.json()["choices"][0]["message"]["content"] != r2.json()["choices"][0]["message"]["content"]
+    assert (
+        r1.json()["choices"][0]["message"]["content"]
+        != r2.json()["choices"][0]["message"]["content"]
+    )
 
 
 def test_prompt_fee_included_in_reservation(client):
@@ -486,6 +589,7 @@ def test_prompt_fee_included_in_reservation(client):
     участия в резерве — N параллельных вызовов с одним и тем же платным
     промптом воспроизводили исходный баг, просто для роялти-механики."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     author = TestClient(app)
@@ -497,13 +601,15 @@ def test_prompt_fee_included_in_reservation(client):
     )
     import re
 
-    prompt_id = re.search(r'<td class="mono">(\d+)</td>\s*</tr>', author.get("/prompts").text).group(1)
+    re.search(r'<td class="mono">(\d+)</td>\s*</tr>', author.get("/prompts").text).group(1)
 
     async def _run():
         async with SessionLocal() as session:
             pricing_cfg = await billing.get_pricing_config(session)
             provider, model = llm.resolve_alias("gpt-5-mini")
-            price = await pricing.find_price(session, provider, model, None, None, datetime.now(timezone.utc))
+            price = await pricing.find_price(
+                session, provider, model, None, None, datetime.now(UTC)
+            )
             messages = [{"role": "user", "content": "hi"}]
             reserve_without_prompt = billing.estimate_reserve_rub(price, messages, {}, pricing_cfg)
             reserve_with_prompt = billing.estimate_reserve_rub(
@@ -528,10 +634,15 @@ def test_reaper_releases_reservation_stuck_by_a_dead_process(client):
     async def _create_stuck_event():
         async with SessionLocal() as session:
             event = await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("8"),
             )
             # Симулируем "процесс упал 20 минут назад, не успев финализировать"
-            event.created_at = datetime.now(timezone.utc) - timedelta(seconds=1200)
+            event.created_at = datetime.now(UTC) - timedelta(seconds=1200)
             session.add(event)
             await session.commit()
             return event.id
@@ -543,7 +654,12 @@ def test_reaper_releases_reservation_stuck_by_a_dead_process(client):
         async with SessionLocal() as session:
             with pytest.raises(billing.InsufficientBalance):
                 await billing.start_call(
-                    session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                    session,
+                    customer_id,
+                    customer_id,
+                    "openai",
+                    "gpt-5-mini",
+                    estimated_reserve_rub=Decimal("8"),
                 )
 
     asyncio.run(_check_blocked_before_reap())
@@ -560,10 +676,17 @@ def test_reaper_releases_reservation_stuck_by_a_dead_process(client):
             event = await session.get(UsageEvent, event_id)
             assert event.status == "failed"
             assert event.error_code == "StaleReservationReaped"
-            assert event.charged_rub is None  # неизвестный вызов — денег не берём, только освобождаем резерв
+            assert (
+                event.charged_rub is None
+            )  # неизвестный вызов — денег не берём, только освобождаем резерв
             # теперь второй вызов проходит — резерв реально снят
             await billing.start_call(
-                session, customer_id, customer_id, "openai", "gpt-5-mini", estimated_reserve_rub=Decimal("8")
+                session,
+                customer_id,
+                customer_id,
+                "openai",
+                "gpt-5-mini",
+                estimated_reserve_rub=Decimal("8"),
             )
 
     asyncio.run(_check_after_reap())

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import Product
+from app.db.models import Product
 
 PRODUCTS = [
     ("ChatGPT Plus", "Подписка OpenAI ChatGPT Plus на 1 месяц", "2400.00"),

@@ -22,7 +22,7 @@
 import argparse
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -32,9 +32,9 @@ from sqlalchemy import or_, select
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.config import settings  # noqa: E402
+from app.core.config import settings  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
-from app.models import ModelPrice  # noqa: E402
+from app.db.models import ModelPrice  # noqa: E402
 
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
 MILLION = Decimal(1_000_000)
@@ -81,15 +81,19 @@ def _diff_percent(ours: Decimal | None, theirs: Decimal | None) -> Decimal | Non
 
 async def _active_price(session, provider: str, model: str, at: datetime) -> ModelPrice | None:
     rows = (
-        await session.execute(
-            select(ModelPrice).where(
-                ModelPrice.provider == provider,
-                ModelPrice.model == model,
-                ModelPrice.valid_from <= at,
-                or_(ModelPrice.valid_until.is_(None), ModelPrice.valid_until > at),
+        (
+            await session.execute(
+                select(ModelPrice).where(
+                    ModelPrice.provider == provider,
+                    ModelPrice.model == model,
+                    ModelPrice.valid_from <= at,
+                    or_(ModelPrice.valid_until.is_(None), ModelPrice.valid_until > at),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return rows[0] if rows else None
 
 
@@ -113,7 +117,7 @@ async def run(apply: bool, search: str | None) -> int:
             print(f"  … и ещё {len(found) - 60}")
         return 0
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     problems = 0
     planned: list[tuple[ModelPrice | None, str, str, Decimal, Decimal]] = []
 
@@ -125,7 +129,9 @@ async def run(apply: bool, search: str | None) -> int:
 
             row = catalog.get(model)
             if row is None:
-                print(f"✗ {alias}: модели «{model}» в каталоге OpenRouter НЕТ — вызовы будут падать")
+                print(
+                    f"✗ {alias}: модели «{model}» в каталоге OpenRouter НЕТ — вызовы будут падать"
+                )
                 problems += 1
                 continue
 
@@ -139,14 +145,20 @@ async def run(apply: bool, search: str | None) -> int:
 
             ours = await _active_price(session, provider, model, now)
             if ours is None:
-                print(f"+ {alias}: цены у нас нет, будет заведена ${theirs_in} / ${theirs_out} за 1M")
+                print(
+                    f"+ {alias}: цены у нас нет, будет заведена ${theirs_in} / ${theirs_out} за 1M"
+                )
                 planned.append((None, provider, model, theirs_in, theirs_out))
                 problems += 1
                 continue
 
             d_in = _diff_percent(ours.price_per_1m_input_tokens, theirs_in)
             d_out = _diff_percent(ours.price_per_1m_output_tokens, theirs_out)
-            worst = max(abs(d) for d in (d_in, d_out) if d is not None) if (d_in or d_out) else Decimal(0)
+            worst = (
+                max(abs(d) for d in (d_in, d_out) if d is not None)
+                if (d_in or d_out)
+                else Decimal(0)
+            )
 
             if worst <= TOLERANCE_PERCENT:
                 print(f"✓ {alias}: сходится (${theirs_in} / ${theirs_out} за 1M)")
@@ -182,17 +194,25 @@ async def run(apply: bool, search: str | None) -> int:
                 )
             )
         await session.commit()
-        print(f"\nГотово: закрыто строк — {sum(1 for p in planned if p[0] is not None)}, "
-              f"заведено новых — {len(planned)}.")
+        print(
+            f"\nГотово: закрыто строк — {sum(1 for p in planned if p[0] is not None)}, "
+            f"заведено новых — {len(planned)}."
+        )
         print("Прошлые вызовы считались по прежним ценам и не пересчитываются.")
     return 0
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Сверка прайса моделей с каталогом OpenRouter")
-    parser.add_argument("--apply", action="store_true", help="применить изменения, а не только показать")
-    parser.add_argument("--check", action="store_true", help="только показать расхождения (по умолчанию)")
-    parser.add_argument("--search", metavar="ПОДСТРОКА", help="показать модели OpenRouter по подстроке")
+    parser.add_argument(
+        "--apply", action="store_true", help="применить изменения, а не только показать"
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="только показать расхождения (по умолчанию)"
+    )
+    parser.add_argument(
+        "--search", metavar="ПОДСТРОКА", help="показать модели OpenRouter по подстроке"
+    )
     args = parser.parse_args()
     sys.exit(asyncio.run(run(apply=args.apply, search=args.search)))
 

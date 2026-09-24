@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Длина пароля не проверялась нигде.
 
 Ни при регистрации, ни в scripts/manage_admin.py, где `--password` объявлен
@@ -14,9 +13,9 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
+from app.core.security import MIN_PASSWORD_LENGTH, hash_password, password_problem
 from app.db import SessionLocal
-from app.models import Customer
-from app.security import MIN_PASSWORD_LENGTH, hash_password, password_problem
+from app.db.models import Customer
 
 
 def test_empty_and_short_passwords_are_refused():

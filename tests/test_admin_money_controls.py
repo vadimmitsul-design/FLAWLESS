@@ -8,9 +8,9 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app import billing
 from app.db import SessionLocal
-from app.models import Customer, PricingConfig, WalletLedger
+from app.db.models import Customer, PricingConfig, WalletLedger
+from app.services import billing
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -25,6 +25,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -35,6 +36,7 @@ def _admin_client():
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)
@@ -54,12 +56,16 @@ def _ledger(customer_id):
     async def _get():
         async with SessionLocal() as session:
             return (
-                await session.execute(
-                    select(WalletLedger)
-                    .where(WalletLedger.customer_id == customer_id)
-                    .order_by(WalletLedger.created_at.desc())
+                (
+                    await session.execute(
+                        select(WalletLedger)
+                        .where(WalletLedger.customer_id == customer_id)
+                        .order_by(WalletLedger.created_at.desc())
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
     return asyncio.run(_get())
 
@@ -307,9 +313,7 @@ def test_negative_markup_and_zero_rate_are_rejected(client):
         == 400
     )
     assert (
-        admin.post(
-            "/admin/pricing", data={"markup_percent": "30", "usd_rub_rate": "0"}
-        ).status_code
+        admin.post("/admin/pricing", data={"markup_percent": "30", "usd_rub_rate": "0"}).status_code
         == 400
     )
 
@@ -361,9 +365,7 @@ def test_non_admin_cannot_reach_pricing(client):
     _signup(client, "money12@test.local")
     assert client.get("/admin/pricing").status_code == 403
     assert (
-        client.post(
-            "/admin/pricing", data={"markup_percent": "0", "usd_rub_rate": "1"}
-        ).status_code
+        client.post("/admin/pricing", data={"markup_percent": "0", "usd_rub_rate": "1"}).status_code
         == 403
     )
 

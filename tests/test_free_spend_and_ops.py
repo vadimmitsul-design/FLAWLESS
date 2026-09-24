@@ -5,16 +5,18 @@
 
 import asyncio
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 
-from app import alerts, billing, llm, pricing
-from app.config import settings
+from app.core.config import settings
 from app.db import SessionLocal
-from app.models import Customer, ModelPrice, UsageEvent
+from app.db.models import Customer, ModelPrice, UsageEvent
+from app.integrations import llm
+from app.services import billing, pricing
+from app.workers import alerts
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -29,6 +31,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -122,7 +125,9 @@ def test_priced_model_still_works(client):
     _fund(client, admin, "free3@test.local")
     api_key = _issue_key(client)
 
-    r = client.post("/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL)
+    r = client.post(
+        "/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json=CALL
+    )
     assert r.status_code == 200
 
 
@@ -152,8 +157,8 @@ def test_expired_price_row_counts_as_unpriced(client):
                     model="expired-model",
                     price_per_1m_input_tokens=Decimal("1"),
                     price_per_1m_output_tokens=Decimal("2"),
-                    valid_from=datetime(2020, 1, 1, tzinfo=timezone.utc),
-                    valid_until=datetime(2021, 1, 1, tzinfo=timezone.utc),
+                    valid_from=datetime(2020, 1, 1, tzinfo=UTC),
+                    valid_until=datetime(2021, 1, 1, tzinfo=UTC),
                 )
             )
             await session.commit()
@@ -163,9 +168,7 @@ def test_expired_price_row_counts_as_unpriced(client):
     async def _check():
         async with SessionLocal() as session:
             with pytest.raises(billing.ModelNotPriced):
-                await billing.price_for_call(
-                    session, "openai", "expired-model", datetime.now(timezone.utc)
-                )
+                await billing.price_for_call(session, "openai", "expired-model", datetime.now(UTC))
 
     asyncio.run(_check())
 
@@ -297,7 +300,7 @@ def test_alerts_fire_on_calls_without_cost(client):
 
     async def _collect():
         async with SessionLocal() as session:
-            return await alerts._collect_problems(session)
+            return await alerts.collect_problems(session)
 
     problems = asyncio.run(_collect())
     assert any(key == "uncosted" for key, _ in problems)
@@ -312,9 +315,9 @@ def test_alerts_stay_quiet_when_nothing_is_wrong(monkeypatch):
     вызовов без себестоимости, и ошибок — в окно они попадают все. Поэтому
     окно уводится в заведомо пустое время: смотрим на час, в котором ничего
     не происходило, и требуем полной тишины."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    quiet_hour = datetime(2031, 1, 1, 12, 0, tzinfo=timezone.utc)
+    quiet_hour = datetime(2031, 1, 1, 12, 0, tzinfo=UTC)
     monkeypatch.setattr(alerts, "utcnow", lambda: quiet_hour)
     # Раздел ресурсов выключаем отдельно: у него окно смотрит НАЗАД без
     # нижней границы (expires_at <= now+7дн), поэтому в будущем часе в него
@@ -322,17 +325,24 @@ def test_alerts_stay_quiet_when_nothing_is_wrong(monkeypatch):
     # проверяет tests/test_resources.py на своих данных.
     monkeypatch.setattr(alerts.settings, "enable_resources", False)
 
+    async def _consistent_wallets(session):
+        return []
+
+    # This test isolates time-window alerts. Reconciliation covers all history
+    # and has separate tests with internally consistent, rollback-only fixtures.
+    monkeypatch.setattr(alerts, "find_wallet_mismatches", _consistent_wallets)
+
     async def _collect():
         async with SessionLocal() as session:
-            return await alerts._collect_problems(session)
+            return await alerts.collect_problems(session)
 
     problems = asyncio.run(_collect())
     assert problems == [], f"тревога на час, в котором ничего не было: {problems}"
 
 
 def test_alert_cooldown_prevents_repeat_spam():
-    alerts._last_sent.clear()
-    assert alerts._cooled_down("проба") is True
-    assert alerts._cooled_down("проба") is False  # повтор подавлен
-    assert alerts._cooled_down("другая") is True  # другой ключ независим
-    alerts._last_sent.clear()
+    alerts.default_cooldown.reset()
+    assert alerts.default_cooldown.allow("проба") is True
+    assert alerts.default_cooldown.allow("проба") is False  # повтор подавлен
+    assert alerts.default_cooldown.allow("другая") is True  # другой ключ независим
+    alerts.default_cooldown.reset()

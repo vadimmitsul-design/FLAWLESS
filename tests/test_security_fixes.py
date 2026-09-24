@@ -10,9 +10,9 @@ import asyncio
 
 from sqlalchemy import select
 
-from app import llm
 from app.db import SessionLocal
-from app.models import Customer, TopupRequest
+from app.db.models import Customer, TopupRequest
+from app.integrations import llm
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -37,6 +37,7 @@ def _issue_api_key(client):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -81,7 +82,11 @@ def test_chat_completions_strips_dangerous_llm_kwargs(client, monkeypatch):
             "openai",
             "gpt-5-mini",
             {
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "prompt_tokens_details": {"cached_tokens": 0}},
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "prompt_tokens_details": {"cached_tokens": 0},
+                },
                 "choices": [{"message": {"content": "ok"}}],
             },
         )

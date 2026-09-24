@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Аудит 21.09.2026 (сольный — воркфлоу с 15 ревизорами упал на лимите
 сессии, разбор шёл вручную): подтверждённые находки и их починка.
 
@@ -14,9 +13,9 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from app.core.security import hash_password
 from app.db import SessionLocal
-from app.models import Customer, ModelPrice, Prompt, Resource, UsageEvent, utcnow
-from app.security import hash_password
+from app.db.models import Customer, ModelPrice, Prompt, Resource, UsageEvent, utcnow
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -37,7 +36,9 @@ def _admin_client():
 def _person(email, name, **kw):
     async def _add():
         async with SessionLocal() as session:
-            person = Customer(email=email, name=name, password_hash=hash_password("Passw0rd!"), **kw)
+            person = Customer(
+                email=email, name=name, password_hash=hash_password("Passw0rd!"), **kw
+            )
             session.add(person)
             await session.commit()
             return person.id
@@ -56,10 +57,12 @@ def test_pending_request_visible_even_without_any_resource(client):
 
     async def _add_request():
         async with SessionLocal() as session:
-            from app.models import ResourceRequest
+            from app.db.models import ResourceRequest
 
             session.add(
-                ResourceRequest(customer_id=employee, kind="subscription", name="ChatGPT Plus для отчётов")
+                ResourceRequest(
+                    customer_id=employee, kind="subscription", name="ChatGPT Plus для отчётов"
+                )
             )
             await session.commit()
 
@@ -68,8 +71,14 @@ def test_pending_request_visible_even_without_any_resource(client):
     async def _no_resources_from(cust_id):
         async with SessionLocal() as session:
             existing = (
-                await session.execute(select(Resource).where(Resource.owner_customer_id == cust_id))
-            ).scalars().all()
+                (
+                    await session.execute(
+                        select(Resource).where(Resource.owner_customer_id == cust_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             return len(existing)
 
     # Свойство теста, не факт продакшена: страница должна показать заявку
@@ -84,7 +93,7 @@ def test_pending_request_visible_even_without_any_resource(client):
 
 
 def test_cached_tokens_not_double_billed_once_priced():
-    from app.pricing import UsageAmounts, compute_cost
+    from app.services.pricing import UsageAmounts, compute_cost
 
     price = ModelPrice(
         provider="openrouter",
@@ -98,7 +107,9 @@ def test_cached_tokens_not_double_billed_once_priced():
     usage = UsageAmounts(input_text_tokens=1000, cached_tokens=400, output_tokens=0)
     cost = compute_cost(price, usage)
 
-    expected = (Decimal(600) * Decimal("3.00") + Decimal(400) * Decimal("0.30")) / Decimal(1_000_000)
+    expected = (Decimal(600) * Decimal("3.00") + Decimal(400) * Decimal("0.30")) / Decimal(
+        1_000_000
+    )
     assert cost == expected.quantize(Decimal("0.000001"))
 
     # Наивный (задвоенный) расчёт брал бы полную ставку за все 1000 плюс
@@ -112,7 +123,7 @@ def test_cached_tokens_billed_as_before_when_cache_price_unset():
     2026-09-21 — ни у одной модели), поведение НЕ меняется: полная ставка
     за все input-токены, как считалось раньше. Иначе фикс сам стал бы
     регрессией — клиент платил бы МЕНЬШЕ, чем провайдер взял с нас."""
-    from app.pricing import UsageAmounts, compute_cost
+    from app.services.pricing import UsageAmounts, compute_cost
 
     price = ModelPrice(
         provider="openrouter",
@@ -168,7 +179,7 @@ def _make_prompt(author_id, price="10.00"):
 def _charge_and_read(billing_id, prompt_id, event_id):
     async def _run():
         async with SessionLocal() as session:
-            from app import billing
+            from app.services import billing
 
             prompt = await session.get(Prompt, prompt_id)
             await billing.charge_prompt_fee(session, billing_id, prompt, event_id)
@@ -249,9 +260,8 @@ def test_zero_daily_limit_is_shown_not_hidden(client):
     Проверка на истинность в шаблоне считала 0.0 отсутствием потолка —
     человек с полностью перекрытым расходом не видел на СВОЕЙ странице
     ни единой строки об этом."""
-    person_id = _person("aud21_zerolimit@test.local", "Ограниченный", daily_limit_rub=Decimal("0"))
+    _person("aud21_zerolimit@test.local", "Ограниченный", daily_limit_rub=Decimal("0"))
 
-    admin = _admin_client()
     # Логинимся как сам ограниченный человек, не админ.
     own = client
     assert own.post(
@@ -288,9 +298,9 @@ def test_destructive_admin_actions_carry_confirm_prompt(client):
     topups_page = admin.get("/admin/topups").text
     assert 'data-confirm="Отклонить заявку' in topups_page
 
-    resets_page_source_has_hook = "data-confirm=" in open(
-        "app/templates/admin_password_resets.html", encoding="utf-8"
-    ).read()
+    resets_page_source_has_hook = (
+        "data-confirm=" in open("app/templates/admin_password_resets.html", encoding="utf-8").read()
+    )
     assert resets_page_source_has_hook
 
     # Общий обработчик подключён один раз в base.html — новая форма получает

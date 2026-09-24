@@ -6,13 +6,13 @@ test_billing_reserves.py). Хелперы продублированы из др
 намеренно (см. обоснование в test_features_wave2.py)."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import Customer, UsageEvent
+from app.db.models import Customer, UsageEvent
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -27,6 +27,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -38,13 +39,17 @@ def _admin_client():
 def _customer_id(email):
     async def _get():
         async with SessionLocal() as session:
-            customer = (await session.execute(select(Customer).where(Customer.email == email))).scalar_one()
+            customer = (
+                await session.execute(select(Customer).where(Customer.email == email))
+            ).scalar_one()
             return customer.id
 
     return asyncio.run(_get())
 
 
-def _make_event(customer_id, model, cost_usd, litellm_cost, charged_rub, created_at, usd_rub_rate="95.0000"):
+def _make_event(
+    customer_id, model, cost_usd, litellm_cost, charged_rub, created_at, usd_rub_rate="95.0000"
+):
     async def _create():
         async with SessionLocal() as session:
             event = UsageEvent(
@@ -81,12 +86,33 @@ def test_reconciliation_totals_scoped_to_the_day(client):
     admin = _admin_client()
     customer_id = _customer_id("recon2@test.local")
 
-    target_day = datetime(2026, 3, 10, 12, 0, tzinfo=timezone.utc)
-    other_day = datetime(2026, 3, 9, 12, 0, tzinfo=timezone.utc)
+    target_day = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+    other_day = datetime(2026, 3, 9, 12, 0, tzinfo=UTC)
 
-    _make_event(customer_id, "gpt-5-mini", cost_usd="0.05", litellm_cost="0.05", charged_rub="10.0000", created_at=target_day)
-    _make_event(customer_id, "gpt-5-mini", cost_usd="0.08", litellm_cost="0.08", charged_rub="20.0000", created_at=target_day)
-    _make_event(customer_id, "gpt-5-mini", cost_usd="99", litellm_cost="99", charged_rub="500.0000", created_at=other_day)
+    _make_event(
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="0.05",
+        litellm_cost="0.05",
+        charged_rub="10.0000",
+        created_at=target_day,
+    )
+    _make_event(
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="0.08",
+        litellm_cost="0.08",
+        charged_rub="20.0000",
+        created_at=target_day,
+    )
+    _make_event(
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="99",
+        litellm_cost="99",
+        charged_rub="500.0000",
+        created_at=other_day,
+    )
 
     r = admin.get("/admin/reconciliation?d=2026-03-10")
     assert r.status_code == 200
@@ -99,10 +125,15 @@ def test_reconciliation_flags_high_cost_discrepancy(client):
     admin = _admin_client()
     customer_id = _customer_id("recon3@test.local")
 
-    day = datetime(2026, 3, 11, 12, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 11, 12, 0, tzinfo=UTC)
     # наша себестоимость сильно выше контрольного litellm_cost -> расхождение
     _make_event(
-        customer_id, "claude-sonnet", cost_usd="1.00", litellm_cost="0.50", charged_rub="150.0000", created_at=day
+        customer_id,
+        "claude-sonnet",
+        cost_usd="1.00",
+        litellm_cost="0.50",
+        charged_rub="150.0000",
+        created_at=day,
     )
 
     r = admin.get("/admin/reconciliation?d=2026-03-11")
@@ -116,9 +147,14 @@ def test_reconciliation_no_discrepancy_signal_when_within_threshold(client):
     admin = _admin_client()
     customer_id = _customer_id("recon4@test.local")
 
-    day = datetime(2026, 3, 12, 12, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 12, 12, 0, tzinfo=UTC)
     _make_event(
-        customer_id, "gemini-flash", cost_usd="1.00", litellm_cost="0.98", charged_rub="150.0000", created_at=day
+        customer_id,
+        "gemini-flash",
+        cost_usd="1.00",
+        litellm_cost="0.98",
+        charged_rub="150.0000",
+        created_at=day,
     )
 
     r = admin.get("/admin/reconciliation?d=2026-03-12")
@@ -131,11 +167,16 @@ def test_reconciliation_flags_low_margin_model(client):
     admin = _admin_client()
     customer_id = _customer_id("recon5@test.local")
 
-    day = datetime(2026, 3, 13, 12, 0, tzinfo=timezone.utc)
+    day = datetime(2026, 3, 13, 12, 0, tzinfo=UTC)
     # выручка почти равна себестоимости -> маржа ~1%, ниже дефолтного порога 15%
     _make_event(
-        customer_id, "gpt-5-mini", cost_usd="1.00", litellm_cost="1.00", charged_rub="96.0000",
-        created_at=day, usd_rub_rate="95.0000",
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="1.00",
+        litellm_cost="1.00",
+        charged_rub="96.0000",
+        created_at=day,
+        usd_rub_rate="95.0000",
     )
 
     r = admin.get("/admin/reconciliation?d=2026-03-13")
@@ -150,8 +191,15 @@ def test_reconciliation_handles_day_with_no_litellm_cost(client):
     admin = _admin_client()
     customer_id = _customer_id("recon6@test.local")
 
-    day = datetime(2026, 3, 14, 12, 0, tzinfo=timezone.utc)
-    _make_event(customer_id, "gpt-5-mini", cost_usd="0.05", litellm_cost=None, charged_rub="10.0000", created_at=day)
+    day = datetime(2026, 3, 14, 12, 0, tzinfo=UTC)
+    _make_event(
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="0.05",
+        litellm_cost=None,
+        charged_rub="10.0000",
+        created_at=day,
+    )
 
     r = admin.get("/admin/reconciliation?d=2026-03-14")
     assert r.status_code == 200
@@ -164,8 +212,12 @@ def test_overview_by_model_shows_cost_and_margin(client):
     customer_id = _customer_id("recon7@test.local")
 
     _make_event(
-        customer_id, "gpt-5-mini", cost_usd="0.10", litellm_cost="0.10", charged_rub="20.0000",
-        created_at=datetime.now(timezone.utc),
+        customer_id,
+        "gpt-5-mini",
+        cost_usd="0.10",
+        litellm_cost="0.10",
+        charged_rub="20.0000",
+        created_at=datetime.now(UTC),
     )
 
     r = admin.get("/admin/overview")

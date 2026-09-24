@@ -13,14 +13,14 @@
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.config import settings
+from app.core.config import settings
 from app.db import SessionLocal
-from app.models import (
+from app.db.models import (
     Customer,
     Resource,
     ResourcePayment,
@@ -42,6 +42,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -61,7 +62,7 @@ def _customer(email):
 
 
 def _day(offset_days: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=offset_days)).strftime("%Y-%m-%d")
+    return (datetime.now(UTC) + timedelta(days=offset_days)).strftime("%Y-%m-%d")
 
 
 def _make(admin, owner_id, name, *, expires_in=30, kind="proxy", provider="Прокси-контора"):
@@ -162,8 +163,13 @@ def test_payment_extends_the_term_and_lands_in_the_journal(client):
 
     r = admin.post(
         f"/admin/resources/{resource.id}/pay",
-        data={"amount": "1500.00", "currency": "RUB", "paid_at": _day(0),
-              "period_end": _day(65), "note": "два месяца"},
+        data={
+            "amount": "1500.00",
+            "currency": "RUB",
+            "paid_at": _day(0),
+            "period_end": _day(65),
+            "note": "два месяца",
+        },
     )
     assert r.status_code in (200, 303)
 
@@ -171,16 +177,20 @@ def test_payment_extends_the_term_and_lands_in_the_journal(client):
         async with SessionLocal() as session:
             fresh = await session.get(Resource, resource.id)
             pays = (
-                await session.execute(
-                    select(ResourcePayment).where(ResourcePayment.resource_id == resource.id)
+                (
+                    await session.execute(
+                        select(ResourcePayment).where(ResourcePayment.resource_id == resource.id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return as_utc(fresh.expires_at), pays
 
     expires_at, pays = asyncio.run(_check())
     assert len(pays) == 1
     assert pays[0].amount == Decimal("1500.00")
-    assert (expires_at - datetime.now(timezone.utc)).days >= 60, "срок не продлился"
+    assert (expires_at - datetime.now(UTC)).days >= 60, "срок не продлился"
     # Период платежа начинается там, где кончался прежний срок — не с нуля.
     assert pays[0].period_start is not None
 
@@ -201,7 +211,7 @@ def test_backdated_payment_does_not_shorten_the_paid_term(client):
     async def _left():
         async with SessionLocal() as session:
             fresh = await session.get(Resource, resource.id)
-            return (as_utc(fresh.expires_at) - datetime.now(timezone.utc)).days
+            return (as_utc(fresh.expires_at) - datetime.now(UTC)).days
 
     assert asyncio.run(_left()) >= 115, "срок уехал назад из-за записи задним числом"
 
@@ -221,7 +231,9 @@ def test_payments_never_touch_the_wallet(client):
                     await session.execute(
                         select(WalletLedger).where(WalletLedger.customer_id == owner.id)
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     before = asyncio.run(_ledger_count())
@@ -255,10 +267,14 @@ def test_archive_keeps_the_payment_history(client):
         async with SessionLocal() as session:
             fresh = await session.get(Resource, resource.id)
             pays = (
-                await session.execute(
-                    select(ResourcePayment).where(ResourcePayment.resource_id == resource.id)
+                (
+                    await session.execute(
+                        select(ResourcePayment).where(ResourcePayment.resource_id == resource.id)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return fresh.archived, len(pays)
 
     archived, pay_count = asyncio.run(_state())
@@ -277,18 +293,50 @@ def test_bad_input_is_rejected(client):
     admin = _admin_client()
     resource = _make(admin, owner.id, "Прокси для проверок")
 
-    assert admin.post("/admin/resources/new", data={
-        "kind": "nonsense", "name": "x", "owner_customer_id": owner.id,
-    }).status_code == 400
-    assert admin.post(f"/admin/resources/{resource.id}/pay", data={
-        "amount": "-5", "currency": "RUB", "period_end": _day(30),
-    }).status_code == 400
-    assert admin.post(f"/admin/resources/{resource.id}/pay", data={
-        "amount": "10", "currency": "GBP", "period_end": _day(30),
-    }).status_code == 400
-    assert admin.post(f"/admin/resources/{resource.id}/pay", data={
-        "amount": "10", "currency": "RUB", "period_end": "позавчера",
-    }).status_code == 400
+    assert (
+        admin.post(
+            "/admin/resources/new",
+            data={
+                "kind": "nonsense",
+                "name": "x",
+                "owner_customer_id": owner.id,
+            },
+        ).status_code
+        == 400
+    )
+    assert (
+        admin.post(
+            f"/admin/resources/{resource.id}/pay",
+            data={
+                "amount": "-5",
+                "currency": "RUB",
+                "period_end": _day(30),
+            },
+        ).status_code
+        == 400
+    )
+    assert (
+        admin.post(
+            f"/admin/resources/{resource.id}/pay",
+            data={
+                "amount": "10",
+                "currency": "GBP",
+                "period_end": _day(30),
+            },
+        ).status_code
+        == 400
+    )
+    assert (
+        admin.post(
+            f"/admin/resources/{resource.id}/pay",
+            data={
+                "amount": "10",
+                "currency": "RUB",
+                "period_end": "позавчера",
+            },
+        ).status_code
+        == 400
+    )
 
 
 # ---------- предупреждение ----------
@@ -296,7 +344,7 @@ def test_bad_input_is_rejected(client):
 
 def test_expiring_resource_produces_an_alert(client):
     """Срок не должен кончаться молча."""
-    from app import alerts
+    from app.workers import alerts
 
     _signup(client, "res_alert@test.local", name="Петров")
     owner = _customer("res_alert@test.local")
@@ -305,7 +353,7 @@ def test_expiring_resource_produces_an_alert(client):
 
     async def _collect():
         async with SessionLocal() as session:
-            return await alerts._collect_problems(session)
+            return await alerts.collect_problems(session)
 
     problems = asyncio.run(_collect())
     texts = " ".join(text for _key, text in problems)
@@ -316,7 +364,7 @@ def test_expiring_resource_produces_an_alert(client):
 def test_alert_key_changes_after_renewal(client):
     """Ключ антиспама включает дату окончания: продлили — предупредят заново,
     а не промолчат, решив, что уже говорили."""
-    from app import alerts
+    from app.workers import alerts
 
     _signup(client, "res_alert2@test.local")
     owner = _customer("res_alert2@test.local")
@@ -325,7 +373,7 @@ def test_alert_key_changes_after_renewal(client):
 
     async def _keys():
         async with SessionLocal() as session:
-            return [k for k, _t in await alerts._collect_problems(session)]
+            return [k for k, _t in await alerts.collect_problems(session)]
 
     before = [k for k in asyncio.run(_keys()) if k.startswith(f"resource:{resource.id}:")]
     admin.post(
@@ -380,9 +428,7 @@ def _ask(client, name, **over):
     async def _find():
         async with SessionLocal() as session:
             return (
-                await session.execute(
-                    select(ResourceRequest).where(ResourceRequest.name == name)
-                )
+                await session.execute(select(ResourceRequest).where(ResourceRequest.name == name))
             ).scalar_one()
 
     return asyncio.run(_find())
@@ -424,8 +470,13 @@ def test_fulfilling_creates_a_resource_for_the_requester(client):
     admin = _admin_client()
     r = admin.post(
         f"/admin/resource-requests/{req.id}/fulfil",
-        data={"amount": "2400", "currency": "RUB", "period_end": _day(30),
-              "url": "https://chat.openai.test", "decision_note": "оплатил картой"},
+        data={
+            "amount": "2400",
+            "currency": "RUB",
+            "period_end": _day(30),
+            "url": "https://chat.openai.test",
+            "decision_note": "оплатил картой",
+        },
     )
     assert r.status_code in (200, 303)
 
@@ -434,10 +485,16 @@ def test_fulfilling_creates_a_resource_for_the_requester(client):
             fresh = await session.get(ResourceRequest, req.id)
             res = await session.get(Resource, fresh.resource_id) if fresh.resource_id else None
             pays = (
-                await session.execute(
-                    select(ResourcePayment).where(ResourcePayment.resource_id == fresh.resource_id)
+                (
+                    await session.execute(
+                        select(ResourcePayment).where(
+                            ResourcePayment.resource_id == fresh.resource_id
+                        )
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             return fresh.status, res, pays
 
     status, resource, pays = asyncio.run(_state())
@@ -497,9 +554,12 @@ def test_a_decided_request_cannot_be_decided_again(client):
         data={"amount": "100", "currency": "RUB", "period_end": _day(30)},
     )
     assert second.status_code == 409
-    assert admin.post(
-        f"/admin/resource-requests/{req.id}/reject", data={"decision_note": "поздно"}
-    ).status_code == 409
+    assert (
+        admin.post(
+            f"/admin/resource-requests/{req.id}/reject", data={"decision_note": "поздно"}
+        ).status_code
+        == 409
+    )
 
     async def _count():
         async with SessionLocal() as session:
@@ -508,7 +568,9 @@ def test_a_decided_request_cannot_be_decided_again(client):
                     await session.execute(
                         select(Resource).where(Resource.name == "Подписка для двойного клика")
                     )
-                ).scalars().all()
+                )
+                .scalars()
+                .all()
             )
 
     assert asyncio.run(_count()) == 1, "двойное решение завело второй ресурс"
@@ -517,14 +579,30 @@ def test_a_decided_request_cannot_be_decided_again(client):
 def test_request_input_is_validated(client):
     _signup(client, "req_bad@test.local")
     _login(client, "req_bad@test.local")
-    assert client.post("/resources/request", data={"kind": "nonsense", "name": "x"}).status_code == 400
-    assert client.post("/resources/request", data={"kind": "proxy", "name": "  "}).status_code == 400
-    assert client.post("/resources/request", data={
-        "kind": "proxy", "name": "ok", "period_months": "0"}).status_code == 400
-    assert client.post("/resources/request", data={
-        "kind": "proxy", "name": "ok", "estimated_amount": "-5"}).status_code == 400
-    assert client.post("/resources/request", data={
-        "kind": "proxy", "name": "ok", "estimated_amount": "вагон"}).status_code == 400
+    assert (
+        client.post("/resources/request", data={"kind": "nonsense", "name": "x"}).status_code == 400
+    )
+    assert (
+        client.post("/resources/request", data={"kind": "proxy", "name": "  "}).status_code == 400
+    )
+    assert (
+        client.post(
+            "/resources/request", data={"kind": "proxy", "name": "ok", "period_months": "0"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/resources/request", data={"kind": "proxy", "name": "ok", "estimated_amount": "-5"}
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/resources/request", data={"kind": "proxy", "name": "ok", "estimated_amount": "вагон"}
+        ).status_code
+        == 400
+    )
 
 
 def test_requests_are_off_with_the_section(client, monkeypatch):

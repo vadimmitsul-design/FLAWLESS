@@ -18,6 +18,8 @@ def _plain(html: str) -> str:
     единицы при переносе. Для проверок это шум — схлопываем в обычный
     пробел."""
     return html.replace("&nbsp;", " ").replace(" ", " ")
+
+
 ADMIN_PASSWORD = "AdminPass123"
 
 
@@ -43,6 +45,7 @@ def _issue_api_key(client):
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)
@@ -159,7 +162,11 @@ def test_unknown_prompt_id_returns_404(client):
     r = client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "prompt_id": 999999},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "prompt_id": 999999,
+        },
     )
     assert r.status_code == 404
 
@@ -178,7 +185,12 @@ def test_dlp_redacts_secret_and_flags_usage_event(client):
         headers={"Authorization": f"Bearer {api_key}"},
         json={
             "model": "gpt-5-mini",
-            "messages": [{"role": "user", "content": "my key is sk-abcdefghijklmnopqrstuvwxyz123456, help me"}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "my key is sk-abcdefghijklmnopqrstuvwxyz123456, help me",
+                }
+            ],
             "mock_response": "ok",
         },
     )
@@ -198,7 +210,11 @@ def test_dlp_leaves_clean_message_unflagged(client):
     client.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {api_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hello, how are you?"}], "mock_response": "fine"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "hello, how are you?"}],
+            "mock_response": "fine",
+        },
     )
     dashboard = client.get("/").text
     assert "DLP" not in dashboard
@@ -210,7 +226,9 @@ def test_dlp_leaves_clean_message_unflagged(client):
 def test_archive_create_and_verify(client):
     _signup(client, "archuser1@test.local")
     content = "This is a unique AI-generated report for wave2 tests."
-    r = client.post("/archive", data={"content": content, "label": "Report v1"}, follow_redirects=True)
+    r = client.post(
+        "/archive", data={"content": content, "label": "Report v1"}, follow_redirects=True
+    )
     assert r.status_code == 200
     assert "Report v1" in r.text
 
@@ -247,7 +265,11 @@ def test_child_account_full_flow():
     admin = _admin_client()
     _topup(parent, admin, "100")
 
-    r = parent.post("/children/new", data={"email": "kid1@test.local", "name": "Kid One", "password": "KidPass123"}, follow_redirects=True)
+    r = parent.post(
+        "/children/new",
+        data={"email": "kid1@test.local", "name": "Kid One", "password": "KidPass123"},
+        follow_redirects=True,
+    )
     assert r.status_code == 200
     assert "Kid One" in r.text
 
@@ -259,7 +281,11 @@ def test_child_account_full_flow():
     r = kid.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {kid_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "напиши сочинение про весну"}], "mock_response": "x"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "напиши сочинение про весну"}],
+            "mock_response": "x",
+        },
     )
     assert r.status_code == 400
     assert r.json()["detail"]["error"]["type"] == "child_mode_blocked"
@@ -267,7 +293,11 @@ def test_child_account_full_flow():
     r = kid.post(
         "/v1/chat/completions",
         headers={"Authorization": f"Bearer {kid_key}"},
-        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "объясни теорему пифагора"}], "mock_response": "давай разберём"},
+        json={
+            "model": "gpt-5-mini",
+            "messages": [{"role": "user", "content": "объясни теорему пифагора"}],
+            "mock_response": "давай разберём",
+        },
     )
     assert r.status_code == 200
 
@@ -285,7 +315,10 @@ def test_child_account_full_flow():
 def test_child_cannot_create_grandchild():
     parent = _new_client()
     _signup(parent, "parent2@test.local")
-    parent.post("/children/new", data={"email": "kid2@test.local", "name": "Kid Two", "password": "KidPass123"})
+    parent.post(
+        "/children/new",
+        data={"email": "kid2@test.local", "name": "Kid Two", "password": "KidPass123"},
+    )
     kid = _new_client()
     kid.post("/login", data={"email": "kid2@test.local", "password": "KidPass123"})
     r = kid.get("/children/new")

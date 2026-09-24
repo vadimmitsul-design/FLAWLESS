@@ -13,7 +13,7 @@ markup_percent/usd_rub_rate — тоже ориентировочные, пра�
 
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -22,9 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import ModelPrice, PricingConfig
+from app.db.models import ModelPrice, PricingConfig
 
-PRICES_VALID_FROM = datetime(2026, 9, 1, tzinfo=timezone.utc)
+PRICES_VALID_FROM = datetime(2026, 9, 1, tzinfo=UTC)
 
 # provider, model, in_per_1m, out_per_1m (USD, себестоимость без наценки).
 # СВЕРЕНО с каталогом OpenRouter 2026-09-11 скриптом sync_openrouter_prices.py.
@@ -44,12 +44,16 @@ async def main() -> None:
     async with SessionLocal() as session:
         for provider, model, in_rate, out_rate in PRICE_ROWS:
             exists = (
-                await session.execute(
-                    select(ModelPrice).where(
-                        ModelPrice.provider == provider, ModelPrice.model == model
+                (
+                    await session.execute(
+                        select(ModelPrice).where(
+                            ModelPrice.provider == provider, ModelPrice.model == model
+                        )
                     )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if exists is None:
                 session.add(
                     ModelPrice(
@@ -69,7 +73,9 @@ async def main() -> None:
                     id=1, markup_percent=DEFAULT_MARKUP_PERCENT, usd_rub_rate=DEFAULT_USD_RUB_RATE
                 )
             )
-            print(f"created pricing_config: markup={DEFAULT_MARKUP_PERCENT}% rate={DEFAULT_USD_RUB_RATE}")
+            print(
+                f"created pricing_config: markup={DEFAULT_MARKUP_PERCENT}% rate={DEFAULT_USD_RUB_RATE}"
+            )
         else:
             print("pricing_config already exists, unchanged")
 

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from app.billing import price_in_rub
-from app.models import PricingConfig
+from app.db.models import PricingConfig
+from app.services.billing import price_in_rub
 
 
 def test_price_in_rub_applies_markup_and_fx():

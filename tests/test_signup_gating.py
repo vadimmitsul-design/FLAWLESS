@@ -10,12 +10,11 @@ conftest выставляет SIGNUP_MODE=open, чтобы остальные ~9
 import asyncio
 import re
 
-import pytest
 from sqlalchemy import select
 
-from app.config import session_secret_is_weak, settings
+from app.core.config import session_secret_is_weak, settings
 from app.db import SessionLocal
-from app.models import Customer, InviteCode
+from app.db.models import Customer, InviteCode
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -31,6 +30,7 @@ def _signup(client, email, name="Test User", password="TestPass123", **extra):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -41,6 +41,7 @@ def _admin_client():
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)

@@ -1,0 +1,357 @@
+[
+  {
+    "method": "GET",
+    "path": "/healthz",
+    "name": "healthz"
+  },
+  {
+    "method": "GET",
+    "path": "/signup",
+    "name": "signup_form"
+  },
+  {
+    "method": "POST",
+    "path": "/signup",
+    "name": "signup_submit"
+  },
+  {
+    "method": "GET",
+    "path": "/login",
+    "name": "login_form"
+  },
+  {
+    "method": "POST",
+    "path": "/login",
+    "name": "login_submit"
+  },
+  {
+    "method": "POST",
+    "path": "/logout",
+    "name": "logout"
+  },
+  {
+    "method": "GET",
+    "path": "/forgot-password",
+    "name": "forgot_password_form"
+  },
+  {
+    "method": "POST",
+    "path": "/forgot-password",
+    "name": "forgot_password_submit"
+  },
+  {
+    "method": "GET",
+    "path": "/docs",
+    "name": "docs_index"
+  },
+  {
+    "method": "GET",
+    "path": "/docs/{slug:path}",
+    "name": "docs_page"
+  },
+  {
+    "method": "GET",
+    "path": "/models",
+    "name": "page_models"
+  },
+  {
+    "method": "GET",
+    "path": "/pricing",
+    "name": "page_pricing"
+  },
+  {
+    "method": "GET",
+    "path": "/product/{slug}",
+    "name": "page_product"
+  },
+  {
+    "method": "GET",
+    "path": "/solutions/{slug}",
+    "name": "page_solutions"
+  },
+  {
+    "method": "GET",
+    "path": "/resources",
+    "name": "my_resources"
+  },
+  {
+    "method": "POST",
+    "path": "/resources/request",
+    "name": "request_resource"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/resources",
+    "name": "admin_resources"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resources/new",
+    "name": "admin_resource_create"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resources/{resource_id}/edit",
+    "name": "admin_resource_edit"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resources/{resource_id}/pay",
+    "name": "admin_resource_pay"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resources/{resource_id}/archive",
+    "name": "admin_resource_archive"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resource-requests/{request_id}/reject",
+    "name": "admin_request_reject"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/resource-requests/{request_id}/fulfil",
+    "name": "admin_request_fulfil"
+  },
+  {
+    "method": "GET",
+    "path": "/",
+    "name": "dashboard"
+  },
+  {
+    "method": "GET",
+    "path": "/usage",
+    "name": "usage_page"
+  },
+  {
+    "method": "GET",
+    "path": "/usage.csv",
+    "name": "usage_csv"
+  },
+  {
+    "method": "POST",
+    "path": "/api-key/regenerate",
+    "name": "create_api_key"
+  },
+  {
+    "method": "POST",
+    "path": "/api-keys/{key_id}/revoke",
+    "name": "revoke_api_key"
+  },
+  {
+    "method": "POST",
+    "path": "/api-keys/{key_id}/limits",
+    "name": "set_api_key_limits"
+  },
+  {
+    "method": "POST",
+    "path": "/topups/new",
+    "name": "new_topup"
+  },
+  {
+    "method": "GET",
+    "path": "/shop",
+    "name": "shop"
+  },
+  {
+    "method": "POST",
+    "path": "/shop/order",
+    "name": "shop_order"
+  },
+  {
+    "method": "GET",
+    "path": "/prompts",
+    "name": "prompts_list"
+  },
+  {
+    "method": "POST",
+    "path": "/prompts",
+    "name": "create_prompt"
+  },
+  {
+    "method": "GET",
+    "path": "/archive",
+    "name": "archive_list"
+  },
+  {
+    "method": "POST",
+    "path": "/archive",
+    "name": "create_archive"
+  },
+  {
+    "method": "GET",
+    "path": "/verify",
+    "name": "verify_form"
+  },
+  {
+    "method": "POST",
+    "path": "/verify",
+    "name": "verify_submit"
+  },
+  {
+    "method": "GET",
+    "path": "/children/new",
+    "name": "new_child_form"
+  },
+  {
+    "method": "POST",
+    "path": "/children/new",
+    "name": "create_child"
+  },
+  {
+    "method": "GET",
+    "path": "/children/{child_id}",
+    "name": "view_child"
+  },
+  {
+    "method": "POST",
+    "path": "/telegram/link",
+    "name": "telegram_link_request"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/overview",
+    "name": "admin_overview"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/reconciliation",
+    "name": "admin_reconciliation"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/topups",
+    "name": "admin_topups"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/topups/{topup_id}/confirm",
+    "name": "admin_confirm_topup"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/topups/{topup_id}/reject",
+    "name": "admin_reject_topup"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/password-resets",
+    "name": "admin_password_resets"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/password-resets/{reset_id}/reset",
+    "name": "admin_reset_password"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/orders",
+    "name": "admin_orders"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/orders/{order_id}/fulfill",
+    "name": "admin_fulfill_order"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/orders/{order_id}/refund",
+    "name": "admin_refund_order"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/customers",
+    "name": "admin_customers"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/customers.csv",
+    "name": "admin_customers_csv"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/customers/{customer_id}/toggle-active",
+    "name": "admin_toggle_customer_active"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/customers/{customer_id}",
+    "name": "admin_customer_detail"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/customers/{customer_id}/balance",
+    "name": "admin_change_balance"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/customers/{customer_id}/card",
+    "name": "admin_customer_card"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/customers/{customer_id}/limits",
+    "name": "admin_set_customer_limits"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/pricing",
+    "name": "admin_pricing"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/pricing",
+    "name": "admin_update_pricing"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/invites",
+    "name": "admin_invites"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/invites/new",
+    "name": "admin_create_invite"
+  },
+  {
+    "method": "GET",
+    "path": "/admin/api-keys",
+    "name": "admin_api_keys"
+  },
+  {
+    "method": "POST",
+    "path": "/admin/api-keys/{key_id}/limits",
+    "name": "admin_set_api_key_limits"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/models",
+    "name": "list_models"
+  },
+  {
+    "method": "GET",
+    "path": "/v1/models/{model_id}",
+    "name": "retrieve_model"
+  },
+  {
+    "method": "POST",
+    "path": "/v1/chat/completions",
+    "name": "chat_completions"
+  },
+  {
+    "method": "GET",
+    "path": "/chat",
+    "name": "web_chat"
+  },
+  {
+    "method": "GET",
+    "path": "/chat/{conversation_id}",
+    "name": "web_chat_conversation"
+  },
+  {
+    "method": "POST",
+    "path": "/chat/send",
+    "name": "web_chat_send"
+  }
+]

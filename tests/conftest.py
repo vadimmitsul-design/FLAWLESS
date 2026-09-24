@@ -10,7 +10,7 @@
 import asyncio
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 TEST_DIR = Path(__file__).resolve().parent
@@ -42,7 +42,7 @@ ADMIN_PASSWORD = "AdminPass123"
 @pytest.fixture(scope="session", autouse=True)
 def _database():
     from app.db import engine
-    from app.models import Base
+    from app.db.models import Base
 
     async def _create():
         async with engine.begin() as conn:
@@ -57,9 +57,9 @@ def _database():
 
 @pytest.fixture(scope="session", autouse=True)
 def _admin(_database):
+    from app.core.security import hash_password
     from app.db import SessionLocal
-    from app.models import Customer
-    from app.security import hash_password
+    from app.db.models import Customer
 
     async def _create():
         async with SessionLocal() as session:
@@ -81,7 +81,7 @@ def _seed_prices(_database):
     from decimal import Decimal
 
     from app.db import SessionLocal
-    from app.models import ModelPrice, PricingConfig
+    from app.db.models import ModelPrice, PricingConfig
 
     async def _create():
         async with SessionLocal() as session:
@@ -94,10 +94,14 @@ def _seed_prices(_database):
                     model="openai/gpt-5-mini",
                     price_per_1m_input_tokens=Decimal("0.25"),
                     price_per_1m_output_tokens=Decimal("1.00"),
-                    valid_from=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                    valid_from=datetime(2026, 1, 1, tzinfo=UTC),
                 )
             )
-            session.add(PricingConfig(id=1, markup_percent=Decimal("30.00"), usd_rub_rate=Decimal("95.0000")))
+            session.add(
+                PricingConfig(
+                    id=1, markup_percent=Decimal("30.00"), usd_rub_rate=Decimal("95.0000")
+                )
+            )
             await session.commit()
 
     asyncio.run(_create())
@@ -108,11 +112,15 @@ def _seed_products(_database):
     from decimal import Decimal
 
     from app.db import SessionLocal
-    from app.models import Product
+    from app.db.models import Product
 
     async def _create():
         async with SessionLocal() as session:
-            session.add(Product(name="ChatGPT Plus", description="Тестовый товар", price_rub=Decimal("2400.00")))
+            session.add(
+                Product(
+                    name="ChatGPT Plus", description="Тестовый товар", price_rub=Decimal("2400.00")
+                )
+            )
             await session.commit()
 
     asyncio.run(_create())
@@ -124,10 +132,9 @@ def _reset_rate_limits():
     см. app/ratelimit.py), в проде это верно, но в тестах все запросы идут с
     одного синтетического IP TestClient — без сброса лимит на /login исчерпывается
     заявками совершенно не связанных тестов. Сбрасываем перед каждым тестом."""
-    from app import ratelimit
+    from app.core import ratelimit
 
-    ratelimit._hits.clear()
-    ratelimit._login_hits.clear()
+    ratelimit.reset()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -135,7 +142,7 @@ def _no_real_telegram_polling():
     """lifespan() запускает telegram_bot.poll_loop() фоновой таской при каждом
     `with TestClient(app)` (см. TELEGRAM_BOT_TOKEN выше) — подменяем на
     бесконечный sleep, чтобы тесты не долбили api.telegram.org."""
-    from app import telegram_bot
+    from app.integrations import telegram_bot
 
     async def _noop_poll_loop():
         try:
@@ -151,6 +158,7 @@ def _no_real_telegram_polling():
 def client():
     """Свежий TestClient (== своя cookie-сессия) на каждый тест."""
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     with TestClient(app) as c:

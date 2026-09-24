@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Дашборд сроков: порядок, счётчики, человек в строке.
 
 Страница отвечает на один вопрос администратора — «у кого когда кончается
@@ -13,12 +12,9 @@
 import asyncio
 from datetime import timedelta
 
-import pytest
-from sqlalchemy import select
-
 from app.db import SessionLocal
-from app.main import _resource_order, _resource_state
-from app.models import Customer, Resource, days_phrase, utcnow
+from app.db.models import Customer, Resource, days_phrase, utcnow
+from app.services.resources import resource_order, resource_state
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -61,7 +57,9 @@ def _resource(name, owner_id, days_from_now):
                     kind="subscription",
                     name=name,
                     owner_customer_id=owner_id,
-                    expires_at=None if days_from_now is None else utcnow() + timedelta(days=days_from_now),
+                    expires_at=None
+                    if days_from_now is None
+                    else utcnow() + timedelta(days=days_from_now),
                 )
             )
             await session.commit()
@@ -90,7 +88,7 @@ def _ordered(codes_and_days):
     items = []
     for label, code, days in codes_and_days:
         items.append({"r": Resource(name=label), "state": {"code": code, "days": days}})
-    items.sort(key=_resource_order)
+    items.sort(key=resource_order)
     return [i["r"].name for i in items]
 
 
@@ -117,9 +115,11 @@ def test_buckets_go_burning_first_and_calm_last():
 
 
 def test_inside_soon_the_nearest_is_first():
-    assert _ordered(
-        [("через 7", "soon", 7), ("сегодня", "soon", 0), ("через 3", "soon", 3)]
-    ) == ["сегодня", "через 3", "через 7"]
+    assert _ordered([("через 7", "soon", 7), ("сегодня", "soon", 0), ("через 3", "soon", 3)]) == [
+        "сегодня",
+        "через 3",
+        "через 7",
+    ]
 
 
 # ---------- страница ----------
@@ -200,5 +200,8 @@ def test_state_still_reads_from_the_date_not_from_a_stored_field(client):
     протухает молча в ту же секунду, как проходит срок."""
     now = utcnow()
     today = Resource(name="x", kind="proxy", expires_at=now)
-    assert _resource_state(today, now, 7)["code"] == "soon"
-    assert _resource_state(Resource(name="x", kind="proxy", expires_at=None), now, 7)["code"] == "unknown"
+    assert resource_state(today, now, 7)["code"] == "soon"
+    assert (
+        resource_state(Resource(name="x", kind="proxy", expires_at=None), now, 7)["code"]
+        == "unknown"
+    )

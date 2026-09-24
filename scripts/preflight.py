@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """Проверка файла настроек ПЕРЕД развёртыванием.
 
 Каждая проверка здесь — ошибка, которую этот проект уже совершал и потратил
@@ -13,13 +12,12 @@
 import argparse
 import os
 import re
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
 # Значения session_secret, с которыми куки подделываются: они же перечислены
-# в app/config.py, но preflight обязан работать без импорта приложения.
+# в app/core/config.py, но preflight обязан работать без импорта приложения.
 WEAK_SECRETS = {
     "change-me",
     "change-me-session-secret",
@@ -62,7 +60,9 @@ def check_self_reference(path: Path, env: dict[str, str]) -> None:
     """
     declared = env.get("ENV_FILE", "")
     if not declared:
-        fail(f"{path.name}: нет строки ENV_FILE={path.name} — контейнер возьмёт настройки другого экземпляра")
+        fail(
+            f"{path.name}: нет строки ENV_FILE={path.name} — контейнер возьмёт настройки другого экземпляра"
+        )
     elif declared != path.name:
         fail(f"{path.name}: ENV_FILE={declared} не совпадает с именем файла")
 
@@ -72,7 +72,9 @@ def check_secrets(path: Path, env: dict[str, str]) -> None:
     if not secret:
         fail(f"{path.name}: SESSION_SECRET пуст — сессионные куки подделываются")
     elif secret.lower() in WEAK_SECRETS or len(secret) < 32:
-        fail(f"{path.name}: SESSION_SECRET слабый ({len(secret)} симв.) — нужно не меньше 32 случайных")
+        fail(
+            f"{path.name}: SESSION_SECRET слабый ({len(secret)} симв.) — нужно не меньше 32 случайных"
+        )
 
     pg = env.get("POSTGRES_PASSWORD", "").strip()
     if not pg:
@@ -112,10 +114,14 @@ def check_provider_keys(path: Path, env: dict[str, str]) -> None:
     if not config.exists():
         warn(f"не найден реестр моделей {config} — проверку ключей пропускаю")
         return
-    needed = set(re.findall(r"api_key:\s*os\.environ/([A-Z0-9_]+)", config.read_text(encoding="utf-8")))
+    needed = set(
+        re.findall(r"api_key:\s*os\.environ/([A-Z0-9_]+)", config.read_text(encoding="utf-8"))
+    )
     for name in sorted(needed):
         if not env.get(name, "").strip() and not os.environ.get(name, "").strip():
-            fail(f"{path.name}: нет {name} — вызовы моделей упадут на авторизации, сервис будет пустым")
+            fail(
+                f"{path.name}: нет {name} — вызовы моделей упадут на авторизации, сервис будет пустым"
+            )
 
 
 def check_signup(path: Path, env: dict[str, str]) -> None:
@@ -142,7 +148,9 @@ def check_collisions(path: Path, env: dict[str, str]) -> None:
     others = [
         other
         for other in sorted(ROOT.glob(".env*"))
-        if other.is_file() and not other.name.endswith(".example") and other.resolve() != path.resolve()
+        if other.is_file()
+        and not other.name.endswith(".example")
+        and other.resolve() != path.resolve()
     ]
     for other in others:
         try:
@@ -152,7 +160,9 @@ def check_collisions(path: Path, env: dict[str, str]) -> None:
         for key in ("APP_PORT", "DB_PORT"):
             mine, theirs = env.get(key, ""), neighbour.get(key, "")
             if mine and mine == theirs:
-                fail(f"{path.name} и {other.name} делят {key}={mine} — второй экземпляр не поднимется")
+                fail(
+                    f"{path.name} и {other.name} делят {key}={mine} — второй экземпляр не поднимется"
+                )
         mine = env.get("TELEGRAM_BOT_TOKEN", "").strip()
         if mine and mine == neighbour.get("TELEGRAM_BOT_TOKEN", "").strip():
             fail(
@@ -162,7 +172,9 @@ def check_collisions(path: Path, env: dict[str, str]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("env_file", help="файл настроек, например .env.internal")
     args = parser.parse_args()
 

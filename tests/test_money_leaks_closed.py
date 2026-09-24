@@ -12,12 +12,11 @@ import asyncio
 import re
 from decimal import Decimal
 
-import pytest
 from sqlalchemy import select
 
-from app import billing
 from app.db import SessionLocal
-from app.models import Customer, Product, Prompt
+from app.db.models import Customer, Product, Prompt
+from app.services import billing
 
 ADMIN_EMAIL = "admin@test.local"
 ADMIN_PASSWORD = "AdminPass123"
@@ -32,6 +31,7 @@ def _signup(client, email, name="Test User", password="TestPass123"):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -42,6 +42,7 @@ def _admin_client():
 
 def _new_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     return TestClient(app)
@@ -112,7 +113,7 @@ def test_child_cannot_siphon_the_parent_wallet_via_prompt_royalty(client):
     превращались в 899.99 у него и +50 у ребёнка за один вызов."""
     _signup(client, "leak_siphon_parent@test.local")
     admin = _admin_client()
-    parent = _fund(admin, "leak_siphon_parent@test.local", "1000")
+    _fund(admin, "leak_siphon_parent@test.local", "1000")
     client.post(
         "/children/new",
         data={"email": "leak_siphon_kid@test.local", "name": "Ребёнок", "password": "KidPass123"},
@@ -125,7 +126,9 @@ def test_child_cannot_siphon_the_parent_wallet_via_prompt_royalty(client):
     prompt_id = _make_prompt(kid.id, "100.00", "Детский промпт")
 
     kid_client = _new_client()
-    kid_client.post("/login", data={"email": "leak_siphon_kid@test.local", "password": "KidPass123"})
+    kid_client.post(
+        "/login", data={"email": "leak_siphon_kid@test.local", "password": "KidPass123"}
+    )
     kid_key = _issue_key(kid_client)
 
     parent_before = _balance("leak_siphon_parent@test.local")
@@ -152,7 +155,9 @@ def test_repeated_calls_do_not_drain_the_parent(client):
     prompt_id = _make_prompt(kid.id, "100.00")
 
     kid_client = _new_client()
-    kid_client.post("/login", data={"email": "leak_siphon2_kid@test.local", "password": "KidPass123"})
+    kid_client.post(
+        "/login", data={"email": "leak_siphon2_kid@test.local", "password": "KidPass123"}
+    )
     kid_key = _issue_key(kid_client)
 
     for _ in range(5):

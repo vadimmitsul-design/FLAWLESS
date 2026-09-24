@@ -16,8 +16,8 @@ import re
 
 import pytest
 
-from app.config import settings
-from app.main import _DOCS_PAGES, _MARKETING_PAGES
+from app.core.config import settings
+from app.core.pages import DOCS_PAGES, MARKETING_PAGES
 
 
 def _signup(client, email, name="Test User", password="TestPass123"):
@@ -58,7 +58,10 @@ def test_models_endpoint_hides_models_without_a_price(client):
     config/models.yaml вызвать нельзя — и предлагать их тоже нельзя."""
     _signup(client, "mdl_priced@test.local")
     key = _api_key(client)
-    ids = [m["id"] for m in client.get("/v1/models", headers={"Authorization": f"Bearer {key}"}).json()["data"]]
+    ids = [
+        m["id"]
+        for m in client.get("/v1/models", headers={"Authorization": f"Bearer {key}"}).json()["data"]
+    ]
     assert "gpt-5-mini" in ids
     assert "claude-sonnet" not in ids
     assert "gemini-flash" not in ids
@@ -86,7 +89,7 @@ def test_model_choice_is_the_same_everywhere(client):
 # ---------- продуктовые страницы и решения ----------
 
 
-@pytest.mark.parametrize("path", [page[0] for page in _MARKETING_PAGES])
+@pytest.mark.parametrize("path", [page[0] for page in MARKETING_PAGES])
 def test_every_marketing_page_renders(client, path):
     r = client.get(path)
     assert r.status_code == 200, f"{path} не отрендерилась"
@@ -145,7 +148,7 @@ def test_integration_guides_render(client):
 
 def test_integration_guides_are_in_the_docs_menu(client):
     html = client.get("/docs").text
-    for _group, path, title, _tpl, _lead in _DOCS_PAGES:
+    for _group, path, title, _tpl, _lead in DOCS_PAGES:
         if path.startswith("/docs/integrations/"):
             assert f'href="{path}"' in html
             assert title in html
@@ -157,9 +160,9 @@ def test_integration_guides_are_in_the_docs_menu(client):
 def test_search_index_is_built_from_the_templates(client):
     """Заголовки берутся из самих шаблонов: если раздел допишут, а индекс
     забудут — поиск не должен отстать от документации."""
-    from app.main import DOCS_SEARCH_INDEX
+    from app.core.pages import DOCS_SEARCH_INDEX
 
-    assert len(DOCS_SEARCH_INDEX) == len(_DOCS_PAGES)
+    assert len(DOCS_SEARCH_INDEX) == len(DOCS_PAGES)
     by_path = {e["path"]: e for e in DOCS_SEARCH_INDEX}
     assert "Шаг 1. Получить ключ" in by_path["/docs"]["headings"]
     assert "Потолки расхода" in by_path["/docs/limits"]["headings"]
@@ -222,7 +225,7 @@ def test_models_endpoint_reports_the_maker_in_owned_by(client):
 def test_alias_is_stable_while_the_route_changes(client):
     """Клиент шлёт алиас, а не идентификатор провайдера: переезд закупки на
     OpenRouter не должен ломать чужой код."""
-    from app import llm
+    from app.integrations import llm
 
     provider, model = llm.resolve_alias("gpt-5-mini")
     assert provider == "openrouter"
@@ -234,6 +237,7 @@ def test_alias_is_stable_while_the_route_changes(client):
 
 def _admin_client():
     from fastapi.testclient import TestClient
+
     from app.main import app
 
     admin = TestClient(app)
@@ -251,7 +255,7 @@ def test_admin_sections_live_in_one_menu_not_in_the_main_row(client):
     for path in ("/admin/overview", "/admin/customers", "/admin/pricing", "/admin/api-keys"):
         assert path not in row, f"{path} стоит в общем ряду ссылок вместо меню"
         assert f'href="{path}"' in html, f"{path} пропал из шапки совсем"
-    assert '<summary>Админка</summary>' in html
+    assert "<summary>Админка</summary>" in html
 
 
 def test_theme_toggle_sits_inside_the_bar(client):
@@ -274,10 +278,10 @@ def test_startup_reports_models_without_a_price(client, caplog):
     import asyncio
     import logging
 
-    from app.main import _report_model_readiness
+    from app.services.catalog import report_model_readiness
 
-    with caplog.at_level(logging.INFO, logger="app.main"):
-        asyncio.run(_report_model_readiness())
+    with caplog.at_level(logging.INFO, logger="app.services.catalog"):
+        asyncio.run(report_model_readiness())
 
     text = caplog.text
     # В conftest заведена цена только для gpt-5-mini — остальные обязаны
@@ -293,10 +297,10 @@ def test_startup_reports_missing_provider_key(client, caplog, monkeypatch):
     import asyncio
     import logging
 
-    from app.main import _report_model_readiness
+    from app.services.catalog import report_model_readiness
 
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    with caplog.at_level(logging.INFO, logger="app.main"):
-        asyncio.run(_report_model_readiness())
+    with caplog.at_level(logging.INFO, logger="app.services.catalog"):
+        asyncio.run(report_model_readiness())
 
     assert "OPENROUTER_API_KEY" in caplog.text
